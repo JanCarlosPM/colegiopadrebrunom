@@ -3,10 +3,19 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Plus, User } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -34,8 +43,8 @@ function imprimirRecibo(data: any) {
         <p><strong>Estudiante:</strong> ${data.estudiante}</p>
         <hr />
         <p><strong>Concepto:</strong> Matrícula</p>
-        <p><strong>Monto total:</strong> ${data.moneda} ${data.total}</p>
-        <p><strong>Pagado:</strong> ${data.moneda} ${data.pagado}</p>
+        <p><strong>Total:</strong> ${data.moneda} ${data.total}</p>
+        <p><strong>Recibido:</strong> ${data.moneda} ${data.pagado}</p>
         <p><strong>Cambio:</strong> ${data.moneda} ${data.cambio}</p>
         <hr />
         <br /><br />
@@ -52,8 +61,13 @@ const fetchData = async (year: number) => {
   const { data: enrollments } = await supabase
     .from("enrollments")
     .select(`
-      id, total_amount, paid_amount, currency, status, enrolled_at,
-      students ( id, full_name, guardians ( full_name, phone ) )
+      id,
+      total_amount,
+      paid_amount,
+      currency,
+      status,
+      enrolled_at,
+      students ( full_name )
     `)
     .eq("academic_year", year)
     .order("enrolled_at", { ascending: false });
@@ -155,7 +169,10 @@ export default function Matriculas() {
       <div className="flex justify-end mb-6">
         <Dialog open={openAdd} onOpenChange={setOpenAdd}>
           <DialogTrigger asChild>
-            <Button><Plus className="mr-2 h-4 w-4" />Registrar Matrícula</Button>
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              Registrar Matrícula
+            </Button>
           </DialogTrigger>
 
           <DialogContent className="max-w-xl">
@@ -163,7 +180,7 @@ export default function Matriculas() {
               <DialogTitle>Pago de Matrícula</DialogTitle>
             </DialogHeader>
 
-            <label>Estudiante</label>
+            <label className="text-sm font-medium">Estudiante</label>
             <Input
               placeholder="Buscar estudiante..."
               value={search}
@@ -193,29 +210,53 @@ export default function Matriculas() {
               </div>
             )}
 
+            {/* TOTAL / MONEDA */}
             <div className="grid grid-cols-2 gap-4 mt-4">
-              <Input type="number" value={total} onChange={(e) => setTotal(+e.target.value)} />
-              <select
-                className="border rounded px-3"
-                value={currency}
-                onChange={(e) => {
-                  const v = e.target.value as "NIO" | "USD";
-                  setCurrency(v);
-                  setTotal(v === "USD" ? 8 : 300);
-                }}
-              >
-                <option value="NIO">C$</option>
-                <option value="USD">$</option>
-              </select>
+              <div>
+                <label className="text-sm font-medium">Total matrícula</label>
+                <Input
+                  type="number"
+                  value={total}
+                  onChange={(e) => setTotal(+e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium">Moneda</label>
+                <select
+                  className="w-full border rounded px-3 py-2"
+                  value={currency}
+                  onChange={(e) => {
+                    const v = e.target.value as "NIO" | "USD";
+                    setCurrency(v);
+                    setTotal(v === "USD" ? 8 : 300);
+                  }}
+                >
+                  <option value="NIO">Córdobas (C$)</option>
+                  <option value="USD">Dólares ($)</option>
+                </select>
+              </div>
             </div>
 
+            {/* RECIBIDO / CAMBIO */}
             <div className="grid grid-cols-2 gap-4 mt-4">
-              <Input type="number" placeholder="Monto entregado" value={paid} onChange={(e) => setPaid(+e.target.value)} />
-              <Input disabled value={cambio > 0 ? cambio : ""} />
+              <div>
+                <label className="text-sm font-medium">Recibido</label>
+                <Input
+                  type="number"
+                  value={paid}
+                  onChange={(e) => setPaid(+e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium">Cambio</label>
+                <Input disabled value={cambio > 0 ? cambio : ""} />
+              </div>
             </div>
 
             <Button
-              className="w-full mt-4"
+              className="w-full mt-6"
               onClick={async () => {
                 try {
                   await createEnrollment.mutateAsync();
@@ -235,7 +276,7 @@ export default function Matriculas() {
                   setInfoMsg(
                     err.message === "YA_MATRICULADO"
                       ? `${selectedStudent.full_name} ya se encuentra matriculado`
-                      : "Error al registrar"
+                      : "Error al registrar matrícula"
                   );
                   setOpenInfo(true);
                 }
@@ -247,12 +288,16 @@ export default function Matriculas() {
         </Dialog>
       </div>
 
-      {/* INFO MODAL */}
+      {/* INFO */}
       <Dialog open={openInfo} onOpenChange={setOpenInfo}>
         <DialogContent className="max-w-sm text-center">
-          <DialogHeader><DialogTitle>Atención</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Atención</DialogTitle>
+          </DialogHeader>
           <p>{infoMsg}</p>
-          <Button className="mt-4 w-full" onClick={() => setOpenInfo(false)}>Aceptar</Button>
+          <Button className="mt-4 w-full" onClick={() => setOpenInfo(false)}>
+            Aceptar
+          </Button>
         </DialogContent>
       </Dialog>
 
@@ -267,6 +312,7 @@ export default function Matriculas() {
             <TableHead>Fecha</TableHead>
           </TableRow>
         </TableHeader>
+
         <TableBody>
           {enrollments.map((e: any) => (
             <TableRow key={e.id}>
@@ -274,13 +320,15 @@ export default function Matriculas() {
               <TableCell>C$ {e.total_amount}</TableCell>
               <TableCell>C$ {e.paid_amount}</TableCell>
               <TableCell>
-                <span className={`px-2 py-1 rounded text-xs ${
-                  e.status === "PAGADO"
-                    ? "bg-green-100 text-green-700"
-                    : e.status === "PARCIAL"
-                    ? "bg-yellow-100 text-yellow-700"
-                    : "bg-red-100 text-red-700"
-                }`}>
+                <span
+                  className={`px-2 py-1 rounded text-xs ${
+                    e.status === "PAGADO"
+                      ? "bg-green-100 text-green-700"
+                      : e.status === "PARCIAL"
+                      ? "bg-yellow-100 text-yellow-700"
+                      : "bg-red-100 text-red-700"
+                  }`}
+                >
                   {e.status}
                 </span>
               </TableCell>

@@ -39,7 +39,7 @@ function imprimirRecibo(data: any) {
       </head>
       <body onload="window.print(); window.close();">
         <h2>Colegio Padre Bruno Martínez</h2>
-        <p><strong>Fecha:</strong> ${data.fecha}</p>
+        <p><strong>Fecha y Hora:</strong> ${data.fecha}</p>
         <p><strong>Estudiante:</strong> ${data.estudiante}</p>
         <hr />
         <p><strong>Concepto:</strong> Matrícula</p>
@@ -52,6 +52,7 @@ function imprimirRecibo(data: any) {
       </body>
     </html>
   `);
+
   win.document.close();
 }
 
@@ -85,7 +86,6 @@ const fetchData = async (year: number) => {
 export default function Matriculas() {
   const qc = useQueryClient();
   const year = new Date().getFullYear();
-  const today = new Date().toISOString().substring(0, 10);
 
   const { data } = useQuery({
     queryKey: ["matriculas", year],
@@ -137,6 +137,8 @@ export default function Matriculas() {
 
       if (exists) throw new Error("YA_MATRICULADO");
 
+      const now = new Date().toISOString();
+
       await supabase.from("enrollments").insert({
         student_id: selectedStudent.id,
         academic_year: year,
@@ -145,18 +147,18 @@ export default function Matriculas() {
         change_amount: cambio,
         currency,
         status: estado,
-        enrolled_at: today,
+        enrolled_at: now,
       });
 
       if (paid > 0) {
         await supabase.from("payments").insert({
           student_id: selectedStudent.id,
           concept: "MATRICULA",
-          amount: paid,
+          amount: Math.min(paid, total),
           currency,
           method: "EFECTIVO",
           academic_year: year,
-          paid_at: today,
+          paid_at: now,
         });
       }
     },
@@ -210,7 +212,6 @@ export default function Matriculas() {
               </div>
             )}
 
-            {/* TOTAL / MONEDA */}
             <div className="grid grid-cols-2 gap-4 mt-4">
               <div>
                 <label className="text-sm font-medium">Total matrícula</label>
@@ -238,7 +239,6 @@ export default function Matriculas() {
               </div>
             </div>
 
-            {/* RECIBIDO / CAMBIO */}
             <div className="grid grid-cols-2 gap-4 mt-4">
               <div>
                 <label className="text-sm font-medium">Recibido</label>
@@ -260,24 +260,34 @@ export default function Matriculas() {
               onClick={async () => {
                 try {
                   await createEnrollment.mutateAsync();
+
                   await qc.invalidateQueries({ queryKey: ["matriculas", year] });
+                  qc.invalidateQueries({ queryKey: ["recent-payments"] });
+
                   setOpenAdd(false);
 
-                  imprimirRecibo({
-                    estudiante: selectedStudent.full_name,
-                    total,
-                    pagado: paid,
-                    cambio,
-                    moneda: currency === "USD" ? "$" : "C$",
-                    fecha: today,
-                  });
+                  setTimeout(() => {
+                    imprimirRecibo({
+                      estudiante: selectedStudent.full_name,
+                      total,
+                      pagado: paid,
+                      cambio,
+                      moneda: currency === "USD" ? "$" : "C$",
+                      fecha: new Date().toLocaleString("es-NI", {
+                        timeZone: "America/Managua",
+                      }),
+                    });
+                  }, 300);
                 } catch (err: any) {
                   setOpenAdd(false);
-                  setInfoMsg(
-                    err.message === "YA_MATRICULADO"
-                      ? `${selectedStudent.full_name} ya se encuentra matriculado`
-                      : "Error al registrar matrícula"
-                  );
+
+                  if (err.message === "YA_MATRICULADO") {
+                    setInfoMsg(`${selectedStudent.full_name} ya se encuentra matriculado`);
+                  } else {
+                    setInfoMsg("Error al registrar matrícula");
+                    console.log(err);
+                  }
+
                   setOpenInfo(true);
                 }
               }}
@@ -288,7 +298,6 @@ export default function Matriculas() {
         </Dialog>
       </div>
 
-      {/* INFO */}
       <Dialog open={openInfo} onOpenChange={setOpenInfo}>
         <DialogContent className="max-w-sm text-center">
           <DialogHeader>
@@ -301,7 +310,6 @@ export default function Matriculas() {
         </DialogContent>
       </Dialog>
 
-      {/* TABLE */}
       <Table>
         <TableHeader>
           <TableRow>
@@ -309,7 +317,7 @@ export default function Matriculas() {
             <TableHead>Monto Total</TableHead>
             <TableHead>Pagado</TableHead>
             <TableHead>Estado</TableHead>
-            <TableHead>Fecha</TableHead>
+            <TableHead>Fecha y Hora</TableHead>
           </TableRow>
         </TableHeader>
 
@@ -319,20 +327,30 @@ export default function Matriculas() {
               <TableCell>{e.students?.full_name}</TableCell>
               <TableCell>C$ {e.total_amount}</TableCell>
               <TableCell>C$ {e.paid_amount}</TableCell>
+
               <TableCell>
                 <span
-                  className={`px-2 py-1 rounded text-xs ${
-                    e.status === "PAGADO"
+                  className={`px-2 py-1 rounded text-xs ${e.status === "PAGADO"
                       ? "bg-green-100 text-green-700"
                       : e.status === "PARCIAL"
-                      ? "bg-yellow-100 text-yellow-700"
-                      : "bg-red-100 text-red-700"
-                  }`}
+                        ? "bg-yellow-100 text-yellow-700"
+                        : "bg-red-100 text-red-700"
+                    }`}
                 >
                   {e.status}
                 </span>
               </TableCell>
-              <TableCell>{e.enrolled_at}</TableCell>
+
+              <TableCell>
+                {new Date(e.enrolled_at).toLocaleString("es-NI", {
+                  timeZone: "America/Managua",
+                  day: "2-digit",
+                  month: "2-digit",
+                  year: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>

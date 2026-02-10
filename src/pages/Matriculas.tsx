@@ -1,319 +1,296 @@
-import { useState } from "react";
+import { useState, useMemo, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, User } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
-/* =========================
-   FETCHERS
-========================= */
+/* ================= FETCHERS ================= */
 
-const fetchEnrollments = async (year: number) => {
-  const { data, error } = await supabase
+const fetchData = async (year: number) => {
+  const { data: enrollments } = await supabase
     .from("enrollments")
     .select(`
       id,
-      academic_year,
-      amount,
+      total_amount,
+      paid_amount,
       currency,
-      payment_method,
       status,
       enrolled_at,
       students (
         id,
-        full_name
+        full_name,
+        guardians ( full_name, phone )
       )
     `)
     .eq("academic_year", year)
-    .order("created_at", { ascending: false });
+    .order("enrolled_at", { ascending: false });
 
-  if (error) throw error;
-  return data;
-};
-
-const fetchStudents = async () => {
-  const { data, error } = await supabase
+  const { data: students } = await supabase
     .from("students")
-    .select("id, full_name")
-    .eq("status", "ACTIVO")
+    .select(`
+      id,
+      full_name,
+      guardians ( full_name, phone )
+    `)
     .order("full_name");
 
-  if (error) throw error;
-  return data;
+  return {
+    enrollments: enrollments ?? [],
+    students: students ?? [],
+  };
 };
 
-const fetchSchoolSettings = async () => {
-  const { data, error } = await supabase
-    .from("school_settings")
-    .select("current_academic_year")
-    .single();
-
-  if (error) throw error;
-  return data;
-};
-
-/* =========================
-   COMPONENT
-========================= */
+/* ================= COMPONENT ================= */
 
 export default function Matriculas() {
   const qc = useQueryClient();
+  const year = new Date().getFullYear();
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const { data: settings } = useQuery({
-    queryKey: ["school_settings"],
-    queryFn: fetchSchoolSettings,
+  const { data } = useQuery({
+    queryKey: ["matriculas", year],
+    queryFn: () => fetchData(year),
   });
 
-  const currentYear = settings?.current_academic_year ?? new Date().getFullYear();
-  const [year, setYear] = useState<number>(currentYear);
-  const [search, setSearch] = useState("");
+  const enrollments = data?.enrollments ?? [];
+  const students = data?.students ?? [];
 
-  const { data: enrollments = [] } = useQuery({
-    queryKey: ["enrollments", year],
-    queryFn: () => fetchEnrollments(year),
-    enabled: !!year,
-  });
-
-  const { data: students = [] } = useQuery({
-    queryKey: ["students"],
-    queryFn: fetchStudents,
-  });
-
-  /* =========================
-     SUMMARY
-  ========================= */
-
-  const total = enrollments.length;
-  const totalAmount = enrollments.reduce((sum: number, e: any) => sum + Number(e.amount), 0);
-  const pending = enrollments.filter((e: any) => e.status === "PENDIENTE").length;
-
-  /* =========================
-     CREATE ENROLLMENT
-  ========================= */
+  /* ================= STATE ================= */
 
   const [openAdd, setOpenAdd] = useState(false);
-  const [form, setForm] = useState<any>({
-    student_id: "",
-    academic_year: year,
-    amount: 0,
-    payment_method: "",
-    enrolled_at: "",
-  });
+  const [searchStudent, setSearchStudent] = useState("");
+  const [selectedStudent, setSelectedStudent] = useState<any>(null);
+  const [showDropdown, setShowDropdown] = useState(false);
+
+  const [currency, setCurrency] = useState<"NIO" | "USD">("NIO");
+  const [amount, setAmount] = useState(300);
+  const [paid, setPaid] = useState(0);
+
+  const today = new Date().toISOString().substring(0, 10);
+  const change = Math.max(paid - amount, 0);
+
+  const status =
+    paid === 0 ? "PENDIENTE" : paid < amount ? "PARCIAL" : "PAGADO";
+
+  /* ================= AUTOCOMPLETE ================= */
+
+  const filteredStudents = useMemo(() => {
+    if (!searchStudent) return [];
+    return students.filter((s: any) =>
+      `${s.full_name} ${s.guardians?.full_name} ${s.guardians?.phone}`
+        .toLowerCase()
+        .includes(searchStudent.toLowerCase())
+    );
+  }, [students, searchStudent]);
+
+  /* ================= MUTATION ================= */
 
   const createEnrollment = useMutation({
     mutationFn: async () => {
-      await supabase.from("enrollments").insert({
-        student_id: form.student_id,
-        academic_year: form.academic_year,
-        amount: form.amount,
-        currency: "NIO",
-        payment_method: form.payment_method,
-        enrolled_at: form.enrolled_at || null,
-        status: form.payment_method ? "PAGADO" : "PENDIENTE",
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["enrollments", year] });
-      setOpenAdd(false);
-      setForm({
-        student_id: "",
+      if (!selectedStudent) throw new Error("Seleccione un estudiante");
+
+      // Validar matrícula única
+      const { data: exists } = await supabase
+        .from("enrollments")
+        .select("id")
+        .eq("student_id", selectedStudent.id)
+        .eq("academic_year", year)
+        .maybeSingle();
+
+      if (exists) {
+        throw new Error("Este estudiante ya tiene matrícula este año");
+      }
+
+      const { error } = await supabase.from("enrollments").insert({
+        student_id: selectedStudent.id,
         academic_year: year,
-        amount: 0,
-        payment_method: "",
-        enrolled_at: "",
+        total_amount: amount,
+        paid_amount: paid,
+        change_amount: change,
+        currency,
+        status,
+        enrolled_at: today,
       });
+
+      if (error) throw error;
+
+      if (paid > 0) {
+        const { error: payErr } = await supabase.from("payments").insert({
+          student_id: selectedStudent.id,
+          concept: "MATRICULA",
+          amount: paid,
+          currency,
+          method: "EFECTIVO",
+          academic_year: year,
+          paid_at: today,
+        });
+        if (payErr) throw payErr;
+      }
     },
   });
 
-  /* =========================
-     FILTER
-  ========================= */
-
-  const filtered = enrollments.filter((e: any) =>
-    e.students?.full_name
-      ?.toLowerCase()
-      .includes(search.toLowerCase())
-  );
-
-  /* =========================
-     RENDER
-  ========================= */
+  /* ================= UI ================= */
 
   return (
-    <DashboardLayout
-      title="Matrículas"
-      subtitle="Gestión de matrículas por año lectivo"
-    >
-      {/* SUMMARY */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="metric-card">
-          <p className="text-sm text-muted-foreground">Matrículas {year}</p>
-          <p className="text-2xl font-bold mt-1">{total}</p>
-        </div>
-        <div className="metric-card">
-          <p className="text-sm text-muted-foreground">Monto Recaudado</p>
-          <p className="text-2xl font-bold text-success mt-1">
-            C${totalAmount.toLocaleString()}
-          </p>
-        </div>
-        <div className="metric-card">
-          <p className="text-sm text-muted-foreground">Pendientes</p>
-          <p className="text-2xl font-bold text-warning mt-1">{pending}</p>
-        </div>
-      </div>
-
+    <DashboardLayout title="Matrículas" subtitle="Pagos de matrícula">
       {/* TOOLBAR */}
-      <div className="flex gap-4 mb-6">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" />
-          <Input
-            placeholder="Buscar estudiante..."
-            className="pl-9"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-
-        <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="2025">2025</SelectItem>
-            <SelectItem value="2024">2024</SelectItem>
-          </SelectContent>
-        </Select>
-
+      <div className="flex justify-end mb-6">
         <Dialog open={openAdd} onOpenChange={setOpenAdd}>
           <DialogTrigger asChild>
             <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              Matricular Estudiante
+              <Plus className="mr-2 h-4 w-4" />
+              Registrar Matrícula
             </Button>
           </DialogTrigger>
 
-          <DialogContent>
+          <DialogContent className="max-w-xl">
             <DialogHeader>
-              <DialogTitle>Nueva Matrícula</DialogTitle>
+              <DialogTitle>Pago de Matrícula</DialogTitle>
             </DialogHeader>
 
-            <div className="grid gap-4 mt-4">
-              <Select onValueChange={(v) => setForm({ ...form, student_id: v })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Seleccionar estudiante" />
-                </SelectTrigger>
-                <SelectContent>
-                  {students.map((s: any) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.full_name}
-                    </SelectItem>
+            {/* ESTUDIANTE AUTOCOMPLETE */}
+            <label className="text-sm font-medium">Estudiante</label>
+            <div className="relative">
+              <Input
+                placeholder="Buscar por nombre, padre/madre o teléfono..."
+                value={searchStudent}
+                onChange={(e) => {
+                  setSearchStudent(e.target.value);
+                  setShowDropdown(true);
+                }}
+                onFocus={() => setShowDropdown(true)}
+              />
+
+              {showDropdown && filteredStudents.length > 0 && (
+                <div
+                  ref={dropdownRef}
+                  className="absolute z-50 w-full bg-white border rounded shadow max-h-48 overflow-y-auto"
+                >
+                  {filteredStudents.map((s: any) => (
+                    <div
+                      key={s.id}
+                      className="p-2 hover:bg-muted cursor-pointer flex gap-2"
+                      onClick={() => {
+                        setSelectedStudent(s);
+                        setSearchStudent(s.full_name);
+                        setShowDropdown(false);
+                      }}
+                    >
+                      <User className="h-4 w-4 mt-1" />
+                      <div>
+                        <p className="font-medium">{s.full_name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {s.guardians?.full_name} · {s.guardians?.phone}
+                        </p>
+                      </div>
+                    </div>
                   ))}
-                </SelectContent>
-              </Select>
+                </div>
+              )}
+            </div>
 
-              <Input
-                type="number"
-                placeholder="Monto (C$)"
-                onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })}
-              />
+            {/* MONTO / MONEDA */}
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <div>
+                <label className="text-sm font-medium">Monto a pagar</label>
+                <Input
+                  type="number"
+                  value={amount}
+                  onChange={(e) => setAmount(Number(e.target.value))}
+                />
+              </div>
 
-              <Select onValueChange={(v) => setForm({ ...form, payment_method: v })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Método de pago" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="EFECTIVO">Efectivo</SelectItem>
-                  <SelectItem value="TRANSFERENCIA">Transferencia</SelectItem>
-                  <SelectItem value="POS">POS</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Input
-                type="date"
-                onChange={(e) => setForm({ ...form, enrolled_at: e.target.value })}
-              />
-
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setOpenAdd(false)}>
-                  Cancelar
-                </Button>
-                <Button onClick={() => createEnrollment.mutate()}>
-                  Registrar Matrícula
-                </Button>
+              <div>
+                <label className="text-sm font-medium">Moneda</label>
+                <select
+                  className="w-full border rounded px-3 py-2"
+                  value={currency}
+                  onChange={(e) => {
+                    const v = e.target.value as "NIO" | "USD";
+                    setCurrency(v);
+                    setAmount(v === "USD" ? 8 : 300);
+                  }}
+                >
+                  <option value="NIO">Córdobas (C$)</option>
+                  <option value="USD">Dólares ($)</option>
+                </select>
               </div>
             </div>
+
+            {/* EFECTIVO / CAMBIO */}
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <Input
+                type="number"
+                placeholder="Monto entregado"
+                value={paid}
+                onChange={(e) => setPaid(Number(e.target.value))}
+              />
+              <Input value={change > 0 ? change : ""} disabled />
+            </div>
+
+            <div className="bg-muted p-3 rounded text-sm mt-4">
+              Método de pago: <strong>Efectivo</strong>
+            </div>
+
+            <Button
+              className="w-full mt-4"
+              disabled={!selectedStudent || createEnrollment.isLoading}
+              onClick={async () => {
+                try {
+                  await createEnrollment.mutateAsync();
+                  await qc.invalidateQueries({
+                    queryKey: ["matriculas", year],
+                  });
+
+                  setOpenAdd(false);
+                  setSelectedStudent(null);
+                  setSearchStudent("");
+                  setPaid(0);
+                  setCurrency("NIO");
+                  setAmount(300);
+                } catch (err: any) {
+                  alert(err.message);
+                }
+              }}
+            >
+              Registrar Pago
+            </Button>
           </DialogContent>
         </Dialog>
       </div>
 
       {/* TABLE */}
-      <div className="table-container">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/50">
-              <TableHead>Estudiante</TableHead>
-              <TableHead>Año</TableHead>
-              <TableHead>Monto</TableHead>
-              <TableHead>Método</TableHead>
-              <TableHead>Fecha</TableHead>
-              <TableHead>Estado</TableHead>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Estudiante</TableHead>
+            <TableHead>Monto Total</TableHead>
+            <TableHead>Pagado</TableHead>
+            <TableHead>Estado</TableHead>
+            <TableHead>Fecha</TableHead>
+          </TableRow>
+        </TableHeader>
+
+        <TableBody>
+          {enrollments.map((e: any) => (
+            <TableRow key={e.id}>
+              <TableCell>{e.students?.full_name}</TableCell>
+              <TableCell>{e.currency === "USD" ? "$" : "C$"} {e.total_amount}</TableCell>
+              <TableCell>{e.currency === "USD" ? "$" : "C$"} {e.paid_amount}</TableCell>
+              <TableCell>{e.status}</TableCell>
+              <TableCell>{e.enrolled_at}</TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.map((e: any) => (
-              <TableRow key={e.id}>
-                <TableCell className="font-medium">
-                  {e.students?.full_name}
-                </TableCell>
-                <TableCell>{e.academic_year}</TableCell>
-                <TableCell>C${Number(e.amount).toLocaleString()}</TableCell>
-                <TableCell>{e.payment_method || "-"}</TableCell>
-                <TableCell>
-                  {e.enrolled_at
-                    ? new Date(e.enrolled_at).toLocaleDateString("es-NI")
-                    : "-"}
-                </TableCell>
-                <TableCell>
-                  <Badge
-                    className={
-                      e.status === "PAGADO"
-                        ? "badge-success"
-                        : "badge-warning"
-                    }
-                  >
-                    {e.status}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+          ))}
+        </TableBody>
+      </Table>
     </DashboardLayout>
   );
 }

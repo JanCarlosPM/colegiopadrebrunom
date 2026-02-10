@@ -1,64 +1,93 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { MetricCard } from "@/components/dashboard/MetricCard";
-import { RevenueChart } from "@/components/dashboard/RevenueChart";
-import { MorosityChart } from "@/components/dashboard/MorosityChart";
 import { RecentPayments } from "@/components/dashboard/RecentPayments";
-import { Users, AlertTriangle, TrendingUp, CreditCard } from "lucide-react";
+import {
+  Users,
+  UserCheck,
+  UserX,
+  DollarSign,
+  Calendar,
+  CreditCard,
+} from "lucide-react";
 
 const Dashboard = () => {
+  const currentMonth = new Date().toLocaleString("es-NI", {
+    month: "long",
+  });
+
   return (
     <DashboardLayout
       title="Dashboard"
-      subtitle="Resumen general del sistema contable"
+      subtitle="Resumen general del sistema escolar"
     >
       {/* Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <MetricCard
           title="Total Estudiantes"
           value="400"
-          change="+12 este mes"
-          changeType="positive"
           icon={Users}
           iconColor="text-primary"
           iconBg="bg-primary/10"
         />
+
         <MetricCard
-          title="Estudiantes Morosos"
-          value="58"
-          change="14.5% del total"
-          changeType="negative"
-          icon={AlertTriangle}
-          iconColor="text-destructive"
-          iconBg="bg-destructive/10"
-        />
-        <MetricCard
-          title="Ingresos del Mes"
-          value="C$64,250"
-          change="+8.2% vs mes anterior"
-          changeType="positive"
-          icon={TrendingUp}
+          title="Estudiantes Matriculados"
+          value="380"
+          icon={UserCheck}
           iconColor="text-success"
           iconBg="bg-success/10"
         />
+
         <MetricCard
-          title="Pagos Hoy"
-          value="24"
-          change="C$36,000 recaudado"
-          changeType="neutral"
-          icon={CreditCard}
+          title="Estudiantes Solventes"
+          value="320"
+          icon={UserCheck}
           iconColor="text-info"
           iconBg="bg-info/10"
         />
+
+        <MetricCard
+          title="Morosos / Pendientes"
+          value="60"
+          icon={UserX}
+          iconColor="text-destructive"
+          iconBg="bg-destructive/10"
+        />
       </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <div className="lg:col-span-2">
-          <RevenueChart />
-        </div>
-        <div>
-          <MorosityChart />
-        </div>
+      {/* Financial Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <MetricCard
+          title={`Ingresos de ${currentMonth}`}
+          value="C$64,250"
+          icon={DollarSign}
+          iconColor="text-success"
+          iconBg="bg-success/10"
+        />
+
+        <MetricCard
+          title="Ingresos Mensualidades"
+          value="C$52,000"
+          icon={Calendar}
+          iconColor="text-primary"
+          iconBg="bg-primary/10"
+        />
+
+        <MetricCard
+          title="Ingresos Matrículas"
+          value="C$12,250"
+          icon={CreditCard}
+          iconColor="text-warning"
+          iconBg="bg-warning/10"
+        />
+
+        <MetricCard
+          title="Pagos Hoy"
+          value="18"
+          icon={DollarSign}
+          iconColor="text-info"
+          iconBg="bg-info/10"
+        />
       </div>
 
       {/* Recent Payments */}

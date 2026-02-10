@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,44 +8,62 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Search, User } from "lucide-react";
+import { Plus, User } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
-/* ================= FETCHERS ================= */
+/* ================= RECIBO ================= */
+
+function imprimirRecibo(data: any) {
+  const win = window.open("", "", "width=800,height=600");
+  if (!win) return;
+
+  win.document.write(`
+    <html>
+      <head>
+        <title>Recibo Matrícula</title>
+        <style>
+          body { font-family: Arial; font-size: 12px; padding: 20px; }
+          h2 { text-align: center; }
+          hr { margin: 10px 0; }
+        </style>
+      </head>
+      <body onload="window.print(); window.close();">
+        <h2>Colegio Padre Bruno Martínez</h2>
+        <p><strong>Fecha:</strong> ${data.fecha}</p>
+        <p><strong>Estudiante:</strong> ${data.estudiante}</p>
+        <hr />
+        <p><strong>Concepto:</strong> Matrícula</p>
+        <p><strong>Monto total:</strong> ${data.moneda} ${data.total}</p>
+        <p><strong>Pagado:</strong> ${data.moneda} ${data.pagado}</p>
+        <p><strong>Cambio:</strong> ${data.moneda} ${data.cambio}</p>
+        <hr />
+        <br /><br />
+        ___________________________<br/>Firma
+      </body>
+    </html>
+  `);
+  win.document.close();
+}
+
+/* ================= FETCH ================= */
 
 const fetchData = async (year: number) => {
   const { data: enrollments } = await supabase
     .from("enrollments")
     .select(`
-      id,
-      total_amount,
-      paid_amount,
-      currency,
-      status,
-      enrolled_at,
-      students (
-        id,
-        full_name,
-        guardians ( full_name, phone )
-      )
+      id, total_amount, paid_amount, currency, status, enrolled_at,
+      students ( id, full_name, guardians ( full_name, phone ) )
     `)
     .eq("academic_year", year)
     .order("enrolled_at", { ascending: false });
 
   const { data: students } = await supabase
     .from("students")
-    .select(`
-      id,
-      full_name,
-      guardians ( full_name, phone )
-    `)
+    .select(`id, full_name, guardians ( full_name, phone )`)
     .order("full_name");
 
-  return {
-    enrollments: enrollments ?? [],
-    students: students ?? [],
-  };
+  return { enrollments: enrollments ?? [], students: students ?? [] };
 };
 
 /* ================= COMPONENT ================= */
@@ -53,7 +71,7 @@ const fetchData = async (year: number) => {
 export default function Matriculas() {
   const qc = useQueryClient();
   const year = new Date().getFullYear();
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const today = new Date().toISOString().substring(0, 10);
 
   const { data } = useQuery({
     queryKey: ["matriculas", year],
@@ -66,38 +84,36 @@ export default function Matriculas() {
   /* ================= STATE ================= */
 
   const [openAdd, setOpenAdd] = useState(false);
-  const [searchStudent, setSearchStudent] = useState("");
+  const [openInfo, setOpenInfo] = useState(false);
+  const [infoMsg, setInfoMsg] = useState("");
+
+  const [search, setSearch] = useState("");
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
-  const [showDropdown, setShowDropdown] = useState(false);
 
   const [currency, setCurrency] = useState<"NIO" | "USD">("NIO");
-  const [amount, setAmount] = useState(300);
+  const [total, setTotal] = useState(300);
   const [paid, setPaid] = useState(0);
 
-  const today = new Date().toISOString().substring(0, 10);
-  const change = Math.max(paid - amount, 0);
+  const cambio = Math.max(paid - total, 0);
 
-  const status =
-    paid === 0 ? "PENDIENTE" : paid < amount ? "PARCIAL" : "PAGADO";
-
-  /* ================= AUTOCOMPLETE ================= */
+  const estado =
+    paid === 0 ? "PENDIENTE" : paid < total ? "PARCIAL" : "PAGADO";
 
   const filteredStudents = useMemo(() => {
-    if (!searchStudent) return [];
+    if (!search) return [];
     return students.filter((s: any) =>
       `${s.full_name} ${s.guardians?.full_name} ${s.guardians?.phone}`
         .toLowerCase()
-        .includes(searchStudent.toLowerCase())
+        .includes(search.toLowerCase())
     );
-  }, [students, searchStudent]);
+  }, [students, search]);
 
   /* ================= MUTATION ================= */
 
   const createEnrollment = useMutation({
     mutationFn: async () => {
-      if (!selectedStudent) throw new Error("Seleccione un estudiante");
+      if (!selectedStudent) throw new Error("NO_STUDENT");
 
-      // Validar matrícula única
       const { data: exists } = await supabase
         .from("enrollments")
         .select("id")
@@ -105,25 +121,21 @@ export default function Matriculas() {
         .eq("academic_year", year)
         .maybeSingle();
 
-      if (exists) {
-        throw new Error("Este estudiante ya tiene matrícula este año");
-      }
+      if (exists) throw new Error("YA_MATRICULADO");
 
-      const { error } = await supabase.from("enrollments").insert({
+      await supabase.from("enrollments").insert({
         student_id: selectedStudent.id,
         academic_year: year,
-        total_amount: amount,
+        total_amount: total,
         paid_amount: paid,
-        change_amount: change,
+        change_amount: cambio,
         currency,
-        status,
+        status: estado,
         enrolled_at: today,
       });
 
-      if (error) throw error;
-
       if (paid > 0) {
-        const { error: payErr } = await supabase.from("payments").insert({
+        await supabase.from("payments").insert({
           student_id: selectedStudent.id,
           concept: "MATRICULA",
           amount: paid,
@@ -132,7 +144,6 @@ export default function Matriculas() {
           academic_year: year,
           paid_at: today,
         });
-        if (payErr) throw payErr;
       }
     },
   });
@@ -140,15 +151,11 @@ export default function Matriculas() {
   /* ================= UI ================= */
 
   return (
-    <DashboardLayout title="Matrículas" subtitle="Pagos de matrícula">
-      {/* TOOLBAR */}
+    <DashboardLayout title="Matrículas" subtitle="Pago de matrícula">
       <div className="flex justify-end mb-6">
         <Dialog open={openAdd} onOpenChange={setOpenAdd}>
           <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              Registrar Matrícula
-            </Button>
+            <Button><Plus className="mr-2 h-4 w-4" />Registrar Matrícula</Button>
           </DialogTrigger>
 
           <DialogContent className="max-w-xl">
@@ -156,108 +163,81 @@ export default function Matriculas() {
               <DialogTitle>Pago de Matrícula</DialogTitle>
             </DialogHeader>
 
-            {/* ESTUDIANTE AUTOCOMPLETE */}
-            <label className="text-sm font-medium">Estudiante</label>
-            <div className="relative">
-              <Input
-                placeholder="Buscar por nombre, padre/madre o teléfono..."
-                value={searchStudent}
-                onChange={(e) => {
-                  setSearchStudent(e.target.value);
-                  setShowDropdown(true);
-                }}
-                onFocus={() => setShowDropdown(true)}
-              />
+            <label>Estudiante</label>
+            <Input
+              placeholder="Buscar estudiante..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
 
-              {showDropdown && filteredStudents.length > 0 && (
-                <div
-                  ref={dropdownRef}
-                  className="absolute z-50 w-full bg-white border rounded shadow max-h-48 overflow-y-auto"
-                >
-                  {filteredStudents.map((s: any) => (
-                    <div
-                      key={s.id}
-                      className="p-2 hover:bg-muted cursor-pointer flex gap-2"
-                      onClick={() => {
-                        setSelectedStudent(s);
-                        setSearchStudent(s.full_name);
-                        setShowDropdown(false);
-                      }}
-                    >
-                      <User className="h-4 w-4 mt-1" />
-                      <div>
-                        <p className="font-medium">{s.full_name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {s.guardians?.full_name} · {s.guardians?.phone}
-                        </p>
-                      </div>
+            {search && (
+              <div className="border rounded max-h-40 overflow-y-auto">
+                {filteredStudents.map((s: any) => (
+                  <div
+                    key={s.id}
+                    className="p-2 hover:bg-muted cursor-pointer flex gap-2"
+                    onClick={() => {
+                      setSelectedStudent(s);
+                      setSearch(s.full_name);
+                    }}
+                  >
+                    <User className="h-4 w-4 mt-1" />
+                    <div>
+                      <p>{s.full_name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {s.guardians?.phone}
+                      </p>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* MONTO / MONEDA */}
-            <div className="grid grid-cols-2 gap-4 mt-4">
-              <div>
-                <label className="text-sm font-medium">Monto a pagar</label>
-                <Input
-                  type="number"
-                  value={amount}
-                  onChange={(e) => setAmount(Number(e.target.value))}
-                />
+                  </div>
+                ))}
               </div>
+            )}
 
-              <div>
-                <label className="text-sm font-medium">Moneda</label>
-                <select
-                  className="w-full border rounded px-3 py-2"
-                  value={currency}
-                  onChange={(e) => {
-                    const v = e.target.value as "NIO" | "USD";
-                    setCurrency(v);
-                    setAmount(v === "USD" ? 8 : 300);
-                  }}
-                >
-                  <option value="NIO">Córdobas (C$)</option>
-                  <option value="USD">Dólares ($)</option>
-                </select>
-              </div>
-            </div>
-
-            {/* EFECTIVO / CAMBIO */}
             <div className="grid grid-cols-2 gap-4 mt-4">
-              <Input
-                type="number"
-                placeholder="Monto entregado"
-                value={paid}
-                onChange={(e) => setPaid(Number(e.target.value))}
-              />
-              <Input value={change > 0 ? change : ""} disabled />
+              <Input type="number" value={total} onChange={(e) => setTotal(+e.target.value)} />
+              <select
+                className="border rounded px-3"
+                value={currency}
+                onChange={(e) => {
+                  const v = e.target.value as "NIO" | "USD";
+                  setCurrency(v);
+                  setTotal(v === "USD" ? 8 : 300);
+                }}
+              >
+                <option value="NIO">C$</option>
+                <option value="USD">$</option>
+              </select>
             </div>
 
-            <div className="bg-muted p-3 rounded text-sm mt-4">
-              Método de pago: <strong>Efectivo</strong>
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <Input type="number" placeholder="Monto entregado" value={paid} onChange={(e) => setPaid(+e.target.value)} />
+              <Input disabled value={cambio > 0 ? cambio : ""} />
             </div>
 
             <Button
               className="w-full mt-4"
-              disabled={!selectedStudent || createEnrollment.isLoading}
               onClick={async () => {
                 try {
                   await createEnrollment.mutateAsync();
-                  await qc.invalidateQueries({
-                    queryKey: ["matriculas", year],
-                  });
-
+                  await qc.invalidateQueries({ queryKey: ["matriculas", year] });
                   setOpenAdd(false);
-                  setSelectedStudent(null);
-                  setSearchStudent("");
-                  setPaid(0);
-                  setCurrency("NIO");
-                  setAmount(300);
+
+                  imprimirRecibo({
+                    estudiante: selectedStudent.full_name,
+                    total,
+                    pagado: paid,
+                    cambio,
+                    moneda: currency === "USD" ? "$" : "C$",
+                    fecha: today,
+                  });
                 } catch (err: any) {
-                  alert(err.message);
+                  setOpenAdd(false);
+                  setInfoMsg(
+                    err.message === "YA_MATRICULADO"
+                      ? `${selectedStudent.full_name} ya se encuentra matriculado`
+                      : "Error al registrar"
+                  );
+                  setOpenInfo(true);
                 }
               }}
             >
@@ -266,6 +246,15 @@ export default function Matriculas() {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* INFO MODAL */}
+      <Dialog open={openInfo} onOpenChange={setOpenInfo}>
+        <DialogContent className="max-w-sm text-center">
+          <DialogHeader><DialogTitle>Atención</DialogTitle></DialogHeader>
+          <p>{infoMsg}</p>
+          <Button className="mt-4 w-full" onClick={() => setOpenInfo(false)}>Aceptar</Button>
+        </DialogContent>
+      </Dialog>
 
       {/* TABLE */}
       <Table>
@@ -278,14 +267,23 @@ export default function Matriculas() {
             <TableHead>Fecha</TableHead>
           </TableRow>
         </TableHeader>
-
         <TableBody>
           {enrollments.map((e: any) => (
             <TableRow key={e.id}>
               <TableCell>{e.students?.full_name}</TableCell>
-              <TableCell>{e.currency === "USD" ? "$" : "C$"} {e.total_amount}</TableCell>
-              <TableCell>{e.currency === "USD" ? "$" : "C$"} {e.paid_amount}</TableCell>
-              <TableCell>{e.status}</TableCell>
+              <TableCell>C$ {e.total_amount}</TableCell>
+              <TableCell>C$ {e.paid_amount}</TableCell>
+              <TableCell>
+                <span className={`px-2 py-1 rounded text-xs ${
+                  e.status === "PAGADO"
+                    ? "bg-green-100 text-green-700"
+                    : e.status === "PARCIAL"
+                    ? "bg-yellow-100 text-yellow-700"
+                    : "bg-red-100 text-red-700"
+                }`}>
+                  {e.status}
+                </span>
+              </TableCell>
               <TableCell>{e.enrolled_at}</TableCell>
             </TableRow>
           ))}

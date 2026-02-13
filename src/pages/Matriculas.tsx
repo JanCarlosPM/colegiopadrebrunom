@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
+import { Printer } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -68,7 +69,11 @@ const fetchData = async (year: number) => {
       currency,
       status,
       enrolled_at,
-      students ( full_name )
+      students (
+        full_name,
+        grades ( name ),
+        sections ( name )
+      )
     `)
     .eq("academic_year", year)
     .order("enrolled_at", { ascending: false });
@@ -80,6 +85,7 @@ const fetchData = async (year: number) => {
 
   return { enrollments: enrollments ?? [], students: students ?? [] };
 };
+
 
 /* ================= COMPONENT ================= */
 
@@ -314,10 +320,13 @@ export default function Matriculas() {
         <TableHeader>
           <TableRow>
             <TableHead>Estudiante</TableHead>
+            <TableHead>Grado</TableHead>
+            <TableHead>Sección</TableHead>
             <TableHead>Monto Total</TableHead>
             <TableHead>Pagado</TableHead>
             <TableHead>Estado</TableHead>
             <TableHead>Fecha y Hora</TableHead>
+            <TableHead className="text-center">Acción</TableHead>
           </TableRow>
         </TableHeader>
 
@@ -325,8 +334,22 @@ export default function Matriculas() {
           {enrollments.map((e: any) => (
             <TableRow key={e.id}>
               <TableCell>{e.students?.full_name}</TableCell>
-              <TableCell>C$ {e.total_amount}</TableCell>
-              <TableCell>C$ {e.paid_amount}</TableCell>
+
+              <TableCell>
+                {e.students?.grades?.name ?? "-"}
+              </TableCell>
+
+              <TableCell>
+                {e.students?.sections?.name ?? "-"}
+              </TableCell>
+
+              <TableCell>
+                {e.currency === "USD" ? "$" : "C$"} {e.total_amount}
+              </TableCell>
+
+              <TableCell>
+                {e.currency === "USD" ? "$" : "C$"} {e.paid_amount}
+              </TableCell>
 
               <TableCell>
                 <span
@@ -351,10 +374,32 @@ export default function Matriculas() {
                   minute: "2-digit",
                 })}
               </TableCell>
+
+              <TableCell className="text-center">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() =>
+                    imprimirRecibo({
+                      estudiante: e.students?.full_name,
+                      total: e.total_amount,
+                      pagado: e.paid_amount,
+                      cambio: Math.max(e.paid_amount - e.total_amount, 0),
+                      moneda: e.currency === "USD" ? "$" : "C$",
+                      fecha: new Date(e.enrolled_at).toLocaleString("es-NI", {
+                        timeZone: "America/Managua",
+                      }),
+                    })
+                  }
+                >
+                  <Printer className="h-4 w-4" />
+                </Button>
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
+
     </DashboardLayout>
   );
 }

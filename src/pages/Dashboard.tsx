@@ -13,28 +13,27 @@ import { supabase } from "@/lib/supabase";
 import { useQuery } from "@tanstack/react-query";
 
 const Dashboard = () => {
-  const currentYear = new Date().getFullYear();
-  const today = new Date().toISOString().substring(0, 10);
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonthNumber = now.getMonth() + 1;
 
-  const currentMonth = new Date().toLocaleString("es-NI", {
+  const currentMonthName = now.toLocaleString("es-NI", {
     month: "long",
   });
 
-  const firstDayMonth = new Date();
-  firstDayMonth.setDate(1);
-  const firstDayMonthISO = firstDayMonth.toISOString().substring(0, 10);
+  const todayISO = now.toISOString().substring(0, 10);
 
   /* ================= FETCH DASHBOARD DATA ================= */
 
   const { data } = useQuery({
-    queryKey: ["dashboard", currentYear],
+    queryKey: ["dashboard", currentYear, currentMonthNumber],
     queryFn: async () => {
       const [
         { count: totalStudents },
         { data: enrollments },
-        { data: paymentsMonth },
-        { data: paymentsAll },
-        { count: paymentsToday },
+        { data: monthlyPayments },
+        { data: allPayments },
+        { count: paymentsTodayMonthly },
       ] = await Promise.all([
         supabase
           .from("students")
@@ -42,57 +41,75 @@ const Dashboard = () => {
 
         supabase
           .from("enrollments")
-          .select("status")
+          .select("student_id, status")
           .eq("academic_year", currentYear),
 
         supabase
           .from("payments")
-          .select("amount, concept")
-          .gte("paid_at", firstDayMonthISO),
+          .select("student_id, amount, concept, month")
+          .eq("concept", "MENSUALIDAD")
+          .eq("month", currentMonthNumber),
 
         supabase
           .from("payments")
-          .select("amount, concept"),
+          .select("amount, concept, academic_year"),
 
         supabase
           .from("payments")
           .select("*", { count: "exact", head: true })
-          .eq("paid_at", today),
+          .eq("concept", "MENSUALIDAD")
+          .gte("paid_at", todayISO)
+          .lte("paid_at", todayISO + "T23:59:59"),
       ]);
 
       const matriculados = enrollments?.length ?? 0;
 
-      const solventes =
-        enrollments?.filter((e: any) => e.status === "PAGADO").length ?? 0;
+      /* ================= SOLVENTES ================= */
+
+      const paidStudentsThisMonth =
+        monthlyPayments?.map((p: any) => p.student_id) ?? [];
+
+      const solventes = paidStudentsThisMonth.length;
+
+      const pendientes = matriculados - solventes;
+
+      /* ================= MOROSOS ================= */
+
+      const lastDayOfMonth = new Date(
+        now.getFullYear(),
+        now.getMonth() + 1,
+        0
+      ).getDate();
 
       const morosos =
-        enrollments?.filter((e: any) => e.status !== "PAGADO").length ?? 0;
+        now.getDate() > lastDayOfMonth ? pendientes : 0;
 
-      const ingresosMes =
-        paymentsMonth?.reduce(
+      /* ================= INGRESOS ================= */
+
+      const ingresosMatriculas =
+        allPayments
+          ?.filter(
+            (p: any) =>
+              p.concept === "MATRICULA" &&
+              p.academic_year === currentYear
+          )
+          .reduce((acc: number, p: any) => acc + Number(p.amount), 0) ?? 0;
+
+      const ingresosMensualidades =
+        monthlyPayments?.reduce(
           (acc: number, p: any) => acc + Number(p.amount),
           0
         ) ?? 0;
-
-      const ingresosMensualidades =
-        paymentsAll
-          ?.filter((p: any) => p.concept === "MENSUALIDAD")
-          .reduce((acc: number, p: any) => acc + Number(p.amount), 0) ?? 0;
-
-      const ingresosMatriculas =
-        paymentsAll
-          ?.filter((p: any) => p.concept === "MATRICULA")
-          .reduce((acc: number, p: any) => acc + Number(p.amount), 0) ?? 0;
 
       return {
         totalStudents: totalStudents ?? 0,
         matriculados,
         solventes,
+        pendientes,
         morosos,
-        ingresosMes,
-        ingresosMensualidades,
         ingresosMatriculas,
-        pagosHoy: paymentsToday ?? 0,
+        ingresosMensualidades,
+        pagosMensualidadesHoy: paymentsTodayMonthly ?? 0,
       };
     },
   });
@@ -101,11 +118,11 @@ const Dashboard = () => {
     totalStudents: 0,
     matriculados: 0,
     solventes: 0,
+    pendientes: 0,
     morosos: 0,
-    ingresosMes: 0,
-    ingresosMensualidades: 0,
     ingresosMatriculas: 0,
-    pagosHoy: 0,
+    ingresosMensualidades: 0,
+    pagosMensualidadesHoy: 0,
   };
 
   return (
@@ -113,7 +130,7 @@ const Dashboard = () => {
       title="Dashboard"
       subtitle="Resumen general del sistema escolar"
     >
-      {/* Metrics Grid */}
+      {/* ================= ESTUDIANTES ================= */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <MetricCard
           title="Total Estudiantes"
@@ -124,7 +141,7 @@ const Dashboard = () => {
         />
 
         <MetricCard
-          title="Estudiantes Matriculados"
+          title={`Matriculados ${currentYear}`}
           value={stats.matriculados}
           icon={UserCheck}
           iconColor="text-success"
@@ -132,7 +149,7 @@ const Dashboard = () => {
         />
 
         <MetricCard
-          title="Estudiantes Solventes"
+          title={`Solventes ${currentMonthName}`}
           value={stats.solventes}
           icon={UserCheck}
           iconColor="text-info"
@@ -140,7 +157,18 @@ const Dashboard = () => {
         />
 
         <MetricCard
-          title="Morosos / Pendientes"
+          title={`Pendientes ${currentMonthName}`}
+          value={stats.pendientes}
+          icon={UserX}
+          iconColor="text-warning"
+          iconBg="bg-warning/10"
+        />
+      </div>
+
+      {/* ================= MOROSOS ================= */}
+      <div className="grid grid-cols-1 md:grid-cols-1 lg:grid-cols-1 gap-4 mb-6">
+        <MetricCard
+          title={`Morosos ${currentMonthName}`}
           value={stats.morosos}
           icon={UserX}
           iconColor="text-destructive"
@@ -148,26 +176,10 @@ const Dashboard = () => {
         />
       </div>
 
-      {/* Financial Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      {/* ================= INGRESOS ================= */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <MetricCard
-          title={`Ingresos de ${currentMonth}`}
-          value={`C$${stats.ingresosMes.toLocaleString()}`}
-          icon={DollarSign}
-          iconColor="text-success"
-          iconBg="bg-success/10"
-        />
-
-        <MetricCard
-          title="Ingresos Mensualidades"
-          value={`C$${stats.ingresosMensualidades.toLocaleString()}`}
-          icon={Calendar}
-          iconColor="text-primary"
-          iconBg="bg-primary/10"
-        />
-
-        <MetricCard
-          title="Ingresos Matrículas"
+          title={`Ingresos Matrículas ${currentYear}`}
           value={`C$${stats.ingresosMatriculas.toLocaleString()}`}
           icon={CreditCard}
           iconColor="text-warning"
@@ -175,11 +187,19 @@ const Dashboard = () => {
         />
 
         <MetricCard
-          title="Pagos Hoy"
-          value={stats.pagosHoy}
+          title={`Ingresos Mensualidades ${currentMonthName}`}
+          value={`C$${stats.ingresosMensualidades.toLocaleString()}`}
+          icon={Calendar}
+          iconColor="text-primary"
+          iconBg="bg-primary/10"
+        />
+
+        <MetricCard
+          title="Pagos Mensualidades Hoy"
+          value={stats.pagosMensualidadesHoy}
           icon={DollarSign}
-          iconColor="text-info"
-          iconBg="bg-info/10"
+          iconColor="text-success"
+          iconBg="bg-success/10"
         />
       </div>
 

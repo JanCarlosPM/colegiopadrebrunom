@@ -127,19 +127,31 @@ export default function Estudiantes() {
 
       if (error) throw error;
 
-      await supabase.from("students").insert({
-        full_name: form.full_name,
-        guardian_id: guardian.id,
-        grade_id: form.grade_id,
-        section_id: form.section_id || null,
-      });
+      const { error: studentError } = await supabase
+        .from("students")
+        .insert({
+          full_name: form.full_name,
+          guardian_id: guardian.id,
+          grade_id: form.grade_id,
+          section_id: form.section_id || null,
+        });
+
+      if (studentError) throw studentError;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["students"] });
       setOpenAdd(false);
       setForm(emptyForm);
     },
+    onError: (error: any) => {
+      if (error.code === "23505") {
+        alert("Este estudiante ya está registrado.");
+      } else {
+        alert("Error al guardar estudiante.");
+      }
+    },
   });
+
 
   const updateStudent = useMutation({
     mutationFn: async () => {
@@ -308,9 +320,13 @@ export default function Estudiantes() {
               </div>
 
               <div className="flex justify-end">
-                <Button onClick={() => createStudent.mutate()}>
-                  Guardar Estudiante
+                <Button
+                  onClick={() => createStudent.mutate()}
+                  disabled={createStudent.isPending}
+                >
+                  {createStudent.isPending ? "Guardando..." : "Guardar Estudiante"}
                 </Button>
+
               </div>
             </div>
           </DialogContent>

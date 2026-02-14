@@ -54,6 +54,15 @@ const App = () => (
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/pagos"
+            element={
+              <ProtectedRoute>
+                <Pagos />
+              </ProtectedRoute>
+            }
+          />
+
 
           <Route
             path="/historial/:id"

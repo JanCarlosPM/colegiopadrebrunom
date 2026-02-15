@@ -230,7 +230,14 @@ export default function Estudiantes() {
           />
         </div>
 
-        <Dialog open={openAdd} onOpenChange={setOpenAdd}>
+        <Dialog
+          open={openAdd}
+          onOpenChange={(value) => {
+            setOpenAdd(value);
+            if (!value) setForm(emptyForm);
+          }}
+        >
+
           <DialogTrigger asChild>
             <Button>
               <Plus className="h-4 w-4 mr-2" />
@@ -250,35 +257,58 @@ export default function Estudiantes() {
                 <h3 className="font-semibold mb-3">
                   Información del Estudiante
                 </h3>
+
                 <div className="grid grid-cols-2 gap-4">
-                  <Input
-                    placeholder="Nombre completo"
-                    onChange={(e) =>
-                      onChange("full_name", e.target.value)
-                    }
-                  />
+                  {/* Nombre estudiante */}
+                  <div>
+                    <Input
+                      placeholder="Nombre completo"
+                      value={form.full_name}
+                      onChange={(e) =>
+                        onChange("full_name", e.target.value)
+                      }
+                    />
+                    {form.full_name?.trim()
+                      === "" && (
+                        <p className="text-xs text-red-500 mt-1">
+                          El nombre del estudiante es obligatorio
+                        </p>
+                      )}
+                  </div>
 
-                  <Select
-                    onValueChange={(v) => {
-                      onChange("grade_id", v);
-                      setSelectedGradeId(v);
-                      onChange("section_id", null);
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Grado" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {grades.map((g: any) => (
-                        <SelectItem key={g.id} value={g.id}>
-                          {g.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {/* Grado */}
+                  <div>
+                    <Select
+                      value={form.grade_id}
+                      onValueChange={(v) => {
+                        onChange("grade_id", v);
+                        setSelectedGradeId(v);
+                        onChange("section_id", null);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Grado" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {grades.map((g: any) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            {g.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
 
+                    {!form.grade_id && (
+                      <p className="text-xs text-red-500 mt-1">
+                        Debe seleccionar un grado
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Sección opcional */}
                   {sections.length > 0 && (
                     <Select
+                      value={form.section_id || ""}
                       onValueChange={(v) =>
                         onChange("section_id", v)
                       }
@@ -303,32 +333,65 @@ export default function Estudiantes() {
                 <h3 className="font-semibold mb-3">
                   Información del Padre o Madre
                 </h3>
+
                 <div className="grid grid-cols-2 gap-4">
-                  <Input
-                    placeholder="Nombre completo"
-                    onChange={(e) =>
-                      onChange("guardian_name", e.target.value)
-                    }
-                  />
-                  <Input
-                    placeholder="Teléfono"
-                    onChange={(e) =>
-                      onChange("guardian_phone", e.target.value)
-                    }
-                  />
+                  {/* Nombre tutor */}
+                  <div>
+                    <Input
+                      placeholder="Nombre completo"
+                      value={form.guardian_name}
+                      onChange={(e) =>
+                        onChange("guardian_name", e.target.value)
+                      }
+                    />
+                    {form.guardian_name.trim() === "" && (
+                      <p className="text-xs text-red-500 mt-1">
+                        El nombre del tutor es obligatorio
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Teléfono */}
+                  <div>
+                    <Input
+                      placeholder="Teléfono"
+                      value={form.guardian_phone}
+                      onChange={(e) =>
+                        onChange(
+                          "guardian_phone",
+                          e.target.value.replace(/[^0-9]/g, "")
+                        )
+                      }
+                    />
+                    {form.guardian_phone.trim() === "" && (
+                      <p className="text-xs text-red-500 mt-1">
+                        El teléfono es obligatorio
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
 
+              {/* BOTÓN */}
               <div className="flex justify-end">
                 <Button
                   onClick={() => createStudent.mutate()}
-                  disabled={createStudent.isPending}
+                  disabled={
+                    createStudent.isPending ||
+                    !form.full_name?.trim()
+                    ||
+                    !form.guardian_name.trim() ||
+                    !form.guardian_phone.trim() ||
+                    !form.grade_id
+                  }
                 >
-                  {createStudent.isPending ? "Guardando..." : "Guardar Estudiante"}
+                  {createStudent.isPending
+                    ? "Guardando..."
+                    : "Guardar Estudiante"}
                 </Button>
-
               </div>
             </div>
+
           </DialogContent>
         </Dialog>
       </div>
@@ -359,18 +422,27 @@ export default function Estudiantes() {
                   size="sm"
                   variant="outline"
                   onClick={() => {
-                    setForm(s);
+                    setForm({
+                      id: s.id,
+                      full_name: s.nombre,
+                      guardian_id: s.guardian_id,
+                      guardian_name: s.tutor,
+                      guardian_phone: s.telefono,
+                      grade_id: s.grade_id,
+                      section_id: s.section_id,
+                    });
                     setSelectedGradeId(s.grade_id);
                     setOpenEdit(true);
                   }}
                 >
                   Editar
                 </Button>
+
                 <Button
                   size="sm"
                   variant="destructive"
                   onClick={() => {
-                    setForm({ id: s.id });
+                    setForm({ ...emptyForm, id: s.id });
                     setOpenDelete(true);
                   }}
                 >
@@ -381,6 +453,128 @@ export default function Estudiantes() {
           ))}
         </TableBody>
       </Table>
+
+      {/* EDITAR */}
+      <Dialog
+        open={openEdit}
+        onOpenChange={(value) => {
+          setOpenEdit(value);
+          if (!value) setForm(emptyForm);
+        }}
+      >
+
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Editar Estudiante</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-6 mt-4">
+            {/* ESTUDIANTE */}
+            <div>
+              <h3 className="font-semibold mb-3">
+                Información del Estudiante
+              </h3>
+
+              <div className="grid grid-cols-2 gap-4">
+                <Input
+                  placeholder="Nombre completo"
+                  value={form.full_name}
+                  onChange={(e) =>
+                    onChange("full_name", e.target.value)
+                  }
+                />
+
+                <Select
+                  value={form.grade_id}
+                  onValueChange={(v) => {
+                    onChange("grade_id", v);
+                    setSelectedGradeId(v);
+                    onChange("section_id", null);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Grado" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {grades.map((g: any) => (
+                      <SelectItem key={g.id} value={g.id}>
+                        {g.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {sections.length > 0 && (
+                  <Select
+                    value={form.section_id || ""}
+                    onValueChange={(v) =>
+                      onChange("section_id", v)
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Sección (opcional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sections.map((s: any) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            </div>
+
+            {/* TUTOR */}
+            <div>
+              <h3 className="font-semibold mb-3">
+                Información del Padre o Madre
+              </h3>
+
+              <div className="grid grid-cols-2 gap-4">
+                <Input
+                  placeholder="Nombre completo"
+                  value={form.guardian_name}
+                  onChange={(e) =>
+                    onChange("guardian_name", e.target.value)
+                  }
+                />
+                <Input
+                  placeholder="Teléfono"
+                  value={form.guardian_phone}
+                  onChange={(e) =>
+                    onChange("guardian_phone", e.target.value)
+                  }
+                />
+              </div>
+            </div>
+
+            {/* BOTONES */}
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setOpenEdit(false);
+                  setForm(emptyForm);
+                }}
+              >
+                Cancelar
+              </Button>
+
+              <Button
+                onClick={() => updateStudent.mutate()}
+                disabled={updateStudent.isPending}
+              >
+                {updateStudent.isPending
+                  ? "Guardando..."
+                  : "Guardar Cambios"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
 
       {/* DELETE */}
       <Dialog open={openDelete} onOpenChange={setOpenDelete}>

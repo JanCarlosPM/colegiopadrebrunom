@@ -1,178 +1,204 @@
+import { useState, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  FileText,
-  Download,
-  Users,
-  CreditCard,
-  TrendingUp,
-  Calendar,
-} from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
+import { supabase } from "@/lib/supabase";
+import { useQuery } from "@tanstack/react-query";
+import { FileText, Download } from "lucide-react";
+import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
-const reportTypes = [
-  {
-    id: "morosos",
-    title: "Estudiantes Morosos",
-    description: "Lista de estudiantes con pagos pendientes",
-    icon: Users,
-    color: "text-destructive",
-    bg: "bg-destructive/10",
-  },
-  {
-    id: "ingresos-mensuales",
-    title: "Ingresos Mensuales",
-    description: "Resumen de ingresos por mes",
-    icon: TrendingUp,
-    color: "text-success",
-    bg: "bg-success/10",
-  },
-  {
-    id: "metodo-pago",
-    title: "Ingresos por Método",
-    description: "Desglose por forma de pago",
-    icon: CreditCard,
-    color: "text-info",
-    bg: "bg-info/10",
-  },
-  {
-    id: "historial-anual",
-    title: "Historial General",
-    description: "Reporte completo del año lectivo",
-    icon: Calendar,
-    color: "text-primary",
-    bg: "bg-primary/10",
-  },
-];
+/* ================= FETCHERS ================= */
 
-const Reportes = () => {
+const fetchStudentsData = async () => {
+  const { data, error } = await supabase
+    .from("students")
+    .select(`
+      id,
+      full_name,
+      grades ( name ),
+      sections ( name ),
+      charges ( status, amount ),
+      enrollments ( status )
+    `);
+
+  if (error) throw error;
+  return data ?? [];
+};
+
+/* ================= COMPONENT ================= */
+
+export default function Reportes() {
+  const { data: students = [] } = useQuery({
+    queryKey: ["report-students"],
+    queryFn: fetchStudentsData,
+  });
+
+  const [mes, setMes] = useState("todos");
+  const [grado, setGrado] = useState("todos");
+  const [estado, setEstado] = useState("todos");
+  const [anio, setAnio] = useState(new Date().getFullYear().toString());
+  const [tipoReporte, setTipoReporte] = useState("estudiantes");
+
+  /* ================= PROCESAMIENTO ================= */
+
+  const reportData = useMemo(() => {
+    let data = [...students];
+
+    if (grado !== "todos") {
+      data = data.filter((s: any) => s.grades?.name === grado);
+    }
+
+    const procesado = data.map((s: any) => {
+      const pendientes = s.charges?.filter((c: any) => c.status === "PENDIENTE") || [];
+      const parciales = s.charges?.filter((c: any) => c.status === "PARCIAL") || [];
+      const pagado = s.charges?.filter((c: any) => c.status === "PAGADO") || [];
+
+      let estadoFinal = "SOLVENTE";
+
+      if (pendientes.length > 0) estadoFinal = "MOROSO";
+      if (parciales.length > 0) estadoFinal = "PARCIAL";
+      if (pagado.length === 0) estadoFinal = "PENDIENTE";
+
+      return {
+        nombre: s.full_name,
+        grado: s.grades?.name,
+        seccion: s.sections?.name,
+        estado: estadoFinal,
+      };
+    });
+
+    switch (tipoReporte) {
+      case "solventes":
+        return procesado.filter((s) => s.estado === "SOLVENTE");
+      case "morosos":
+        return procesado.filter((s) => s.estado === "MOROSO");
+      case "parciales":
+        return procesado.filter((s) => s.estado === "PARCIAL");
+      case "pendientes":
+        return procesado.filter((s) => s.estado === "PENDIENTE");
+      default:
+        return procesado;
+    }
+  }, [students, grado, estado, tipoReporte]);
+
+  /* ================= EXPORT EXCEL ================= */
+
+  const exportExcel = () => {
+    const worksheet = XLSX.utils.json_to_sheet(reportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Reporte");
+    XLSX.writeFile(workbook, `reporte_${tipoReporte}.xlsx`);
+  };
+
+  /* ================= EXPORT PDF ================= */
+
+  const exportPDF = () => {
+    const doc = new jsPDF();
+    doc.text("Reporte Escolar", 14, 15);
+
+    autoTable(doc, {
+      head: [["Nombre", "Grado", "Sección", "Estado"]],
+      body: reportData.map((r) => [
+        r.nombre,
+        r.grado,
+        r.seccion,
+        r.estado,
+      ]),
+      startY: 20,
+    });
+
+    doc.save(`reporte_${tipoReporte}.pdf`);
+  };
+
+  /* ================= UI ================= */
+
   return (
-    <DashboardLayout
-      title="Reportes"
-      subtitle="Generación de reportes financieros"
-    >
-      {/* Filters */}
-      <div className="metric-card mb-6">
-        <h3 className="font-semibold text-foreground mb-4">Filtros de Reporte</h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
-            <label className="input-label">Mes</label>
-            <Select defaultValue="diciembre">
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos los meses</SelectItem>
-                <SelectItem value="diciembre">Diciembre</SelectItem>
-                <SelectItem value="noviembre">Noviembre</SelectItem>
-                <SelectItem value="octubre">Octubre</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <label className="input-label">Grado</label>
-            <Select defaultValue="todos">
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos los grados</SelectItem>
-                <SelectItem value="1">1er Grado</SelectItem>
-                <SelectItem value="2">2do Grado</SelectItem>
-                <SelectItem value="3">3er Grado</SelectItem>
-                <SelectItem value="4">4to Grado</SelectItem>
-                <SelectItem value="5">5to Grado</SelectItem>
-                <SelectItem value="6">6to Grado</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <label className="input-label">Estado</label>
-            <Select defaultValue="todos">
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos</SelectItem>
-                <SelectItem value="solvente">Solventes</SelectItem>
-                <SelectItem value="moroso">Morosos</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <label className="input-label">Método de Pago</label>
-            <Select defaultValue="todos">
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos</SelectItem>
-                <SelectItem value="efectivo">Efectivo</SelectItem>
-                <SelectItem value="transferencia">Transferencia</SelectItem>
-                <SelectItem value="pos">POS</SelectItem>
-                <SelectItem value="pocket">Pocket Lafise</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </div>
+    <DashboardLayout title="Reportes" subtitle="Reportes dinámicos del sistema">
+      {/* FILTROS */}
+      <Card className="p-4 mb-6 grid grid-cols-1 md:grid-cols-5 gap-4">
+        <Select value={tipoReporte} onValueChange={setTipoReporte}>
+          <SelectTrigger>
+            <SelectValue placeholder="Tipo Reporte" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="estudiantes">Todos los Estudiantes</SelectItem>
+            <SelectItem value="solventes">Estudiantes Solventes</SelectItem>
+            <SelectItem value="morosos">Estudiantes Morosos</SelectItem>
+            <SelectItem value="parciales">Estudiantes Parciales</SelectItem>
+            <SelectItem value="pendientes">Estudiantes Pendientes</SelectItem>
+          </SelectContent>
+        </Select>
 
-      {/* Report Types */}
-      <h3 className="font-semibold text-foreground mb-4">Tipos de Reportes</h3>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        {reportTypes.map((report) => (
-          <Card key={report.id} className="hover:shadow-elevated transition-shadow cursor-pointer">
-            <CardHeader className="flex flex-row items-center gap-4 pb-2">
-              <div className={`p-3 rounded-lg ${report.bg}`}>
-                <report.icon className={`h-6 w-6 ${report.color}`} />
-              </div>
-              <div className="flex-1">
-                <CardTitle className="text-base">{report.title}</CardTitle>
-                <CardDescription>{report.description}</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="flex-1">
-                  <FileText className="h-4 w-4 mr-2" />
-                  Vista Previa
-                </Button>
-                <Button variant="outline" size="sm">
-                  <Download className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+        <Select value={grado} onValueChange={setGrado}>
+          <SelectTrigger>
+            <SelectValue placeholder="Grado" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos</SelectItem>
+            {[...new Set(students.map((s: any) => s.grades?.name))].map(
+              (g: any) =>
+                g && (
+                  <SelectItem key={g} value={g}>
+                    {g}
+                  </SelectItem>
+                )
+            )}
+          </SelectContent>
+        </Select>
 
-      {/* Export Options */}
-      <div className="metric-card">
-        <h3 className="font-semibold text-foreground mb-4">Exportar Datos</h3>
-        <div className="flex flex-wrap gap-3">
-          <Button variant="outline">
-            <FileText className="h-4 w-4 mr-2" />
-            Exportar a PDF
-          </Button>
-          <Button variant="outline">
-            <FileText className="h-4 w-4 mr-2" />
-            Exportar a Excel
-          </Button>
-          <Button variant="outline">
-            <FileText className="h-4 w-4 mr-2" />
-            Imprimir Reporte
-          </Button>
+        <Input
+          type="number"
+          value={anio}
+          onChange={(e) => setAnio(e.target.value)}
+        />
+      </Card>
+
+      {/* VISTA PREVIA */}
+      <Card className="p-4 mb-6">
+        <p className="mb-4 font-semibold">
+          {reportData.length} registros encontrados
+        </p>
+
+        <div className="overflow-auto max-h-96">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b">
+                <th className="text-left p-2">Nombre</th>
+                <th className="text-left p-2">Grado</th>
+                <th className="text-left p-2">Sección</th>
+                <th className="text-left p-2">Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reportData.map((r, i) => (
+                <tr key={i} className="border-b">
+                  <td className="p-2">{r.nombre}</td>
+                  <td className="p-2">{r.grado}</td>
+                  <td className="p-2">{r.seccion}</td>
+                  <td className="p-2">{r.estado}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+      </Card>
+
+      {/* EXPORTAR */}
+      <div className="flex gap-4">
+        <Button onClick={exportPDF}>
+          <FileText className="h-4 w-4 mr-2" />
+          Exportar PDF
+        </Button>
+
+        <Button onClick={exportExcel}>
+          <Download className="h-4 w-4 mr-2" />
+          Exportar Excel
+        </Button>
       </div>
     </DashboardLayout>
   );
-};
-
-export default Reportes;
+}

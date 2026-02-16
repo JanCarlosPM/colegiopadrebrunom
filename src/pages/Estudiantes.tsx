@@ -356,19 +356,31 @@ export default function Estudiantes() {
                     <Input
                       placeholder="Teléfono"
                       value={form.guardian_phone}
+                      maxLength={8}
                       onChange={(e) =>
                         onChange(
                           "guardian_phone",
-                          e.target.value.replace(/[^0-9]/g, "")
+                          e.target.value
+                            .replace(/[^0-9]/g, "") // solo números
+                            .slice(0, 8)           // máximo 8 dígitos
                         )
                       }
                     />
+
                     {form.guardian_phone.trim() === "" && (
                       <p className="text-xs text-red-500 mt-1">
                         El teléfono es obligatorio
                       </p>
                     )}
+
+                    {form.guardian_phone &&
+                      form.guardian_phone.length < 8 && (
+                        <p className="text-xs text-red-500 mt-1">
+                          El teléfono debe tener 8 dígitos
+                        </p>
+                      )}
                   </div>
+
                 </div>
               </div>
 
@@ -462,7 +474,6 @@ export default function Estudiantes() {
           if (!value) setForm(emptyForm);
         }}
       >
-
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Editar Estudiante</DialogTitle>
@@ -476,34 +487,52 @@ export default function Estudiantes() {
               </h3>
 
               <div className="grid grid-cols-2 gap-4">
-                <Input
-                  placeholder="Nombre completo"
-                  value={form.full_name}
-                  onChange={(e) =>
-                    onChange("full_name", e.target.value)
-                  }
-                />
+                {/* Nombre */}
+                <div>
+                  <Input
+                    placeholder="Nombre completo"
+                    value={form.full_name || ""}
+                    onChange={(e) =>
+                      onChange("full_name", e.target.value)
+                    }
+                  />
+                  {!form.full_name?.trim() && (
+                    <p className="text-xs text-red-500 mt-1">
+                      El nombre es obligatorio
+                    </p>
+                  )}
+                </div>
 
-                <Select
-                  value={form.grade_id}
-                  onValueChange={(v) => {
-                    onChange("grade_id", v);
-                    setSelectedGradeId(v);
-                    onChange("section_id", null);
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Grado" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {grades.map((g: any) => (
-                      <SelectItem key={g.id} value={g.id}>
-                        {g.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* Grado */}
+                <div>
+                  <Select
+                    value={form.grade_id || ""}
+                    onValueChange={(v) => {
+                      onChange("grade_id", v);
+                      setSelectedGradeId(v);
+                      onChange("section_id", null);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Grado" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {grades.map((g: any) => (
+                        <SelectItem key={g.id} value={g.id}>
+                          {g.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
+                  {!form.grade_id && (
+                    <p className="text-xs text-red-500 mt-1">
+                      Debe seleccionar un grado
+                    </p>
+                  )}
+                </div>
+
+                {/* Sección opcional */}
                 {sections.length > 0 && (
                   <Select
                     value={form.section_id || ""}
@@ -533,20 +562,49 @@ export default function Estudiantes() {
               </h3>
 
               <div className="grid grid-cols-2 gap-4">
-                <Input
-                  placeholder="Nombre completo"
-                  value={form.guardian_name}
-                  onChange={(e) =>
-                    onChange("guardian_name", e.target.value)
-                  }
-                />
-                <Input
-                  placeholder="Teléfono"
-                  value={form.guardian_phone}
-                  onChange={(e) =>
-                    onChange("guardian_phone", e.target.value)
-                  }
-                />
+                {/* Nombre tutor */}
+                <div>
+                  <Input
+                    placeholder="Nombre completo"
+                    value={form.guardian_name || ""}
+                    onChange={(e) =>
+                      onChange("guardian_name", e.target.value)
+                    }
+                  />
+                  {!form.guardian_name?.trim() && (
+                    <p className="text-xs text-red-500 mt-1">
+                      El nombre del tutor es obligatorio
+                    </p>
+                  )}
+                </div>
+
+                {/* Teléfono */}
+                <div>
+                  <Input
+                    placeholder="Teléfono"
+                    value={form.guardian_phone || ""}
+                    maxLength={8}
+                    onChange={(e) =>
+                      onChange(
+                        "guardian_phone",
+                        e.target.value
+                          .replace(/[^0-9]/g, "")
+                          .slice(0, 8)
+                      )
+                    }
+                  />
+                  {!form.guardian_phone?.trim() && (
+                    <p className="text-xs text-red-500 mt-1">
+                      El teléfono es obligatorio
+                    </p>
+                  )}
+                  {form.guardian_phone &&
+                    form.guardian_phone.length < 8 && (
+                      <p className="text-xs text-red-500 mt-1">
+                        El teléfono debe tener 8 dígitos
+                      </p>
+                    )}
+                </div>
               </div>
             </div>
 
@@ -564,7 +622,14 @@ export default function Estudiantes() {
 
               <Button
                 onClick={() => updateStudent.mutate()}
-                disabled={updateStudent.isPending}
+                disabled={
+                  updateStudent.isPending ||
+                  !form.full_name?.trim() ||
+                  !form.grade_id ||
+                  !form.guardian_name?.trim() ||
+                  !form.guardian_phone?.trim() ||
+                  form.guardian_phone.length < 8
+                }
               >
                 {updateStudent.isPending
                   ? "Guardando..."

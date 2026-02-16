@@ -9,6 +9,7 @@ import {
   DollarSign,
   Calendar,
   CreditCard,
+  Percent,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -38,18 +39,19 @@ const Dashboard = () => {
 
         supabase
           .from("enrollments")
-          .select("student_id")
+          .select("student_id, total_amount, paid_amount")
           .eq("academic_year", currentYear),
 
         supabase
           .from("payments")
           .select("student_id, amount, concept, month, currency, academic_year")
           .eq("concept", "MENSUALIDAD")
-          .eq("month", currentMonthNumber),
+          .eq("month", currentMonthNumber)
+          .eq("academic_year", currentYear),
 
         supabase
           .from("payments")
-          .select("amount, concept, academic_year, currency"),
+          .select("student_id, amount, concept, academic_year, currency"),
 
         supabase
           .from("payments")
@@ -75,6 +77,29 @@ const Dashboard = () => {
 
       const morosos =
         now.getDate() > lastDayOfMonth ? pendientes : 0;
+
+      /* ======================
+         PARCIALES
+      ====================== */
+
+      // MATRÍCULA PARCIAL
+      const matriculaParcial =
+        enrollments?.filter((e: any) => {
+          const total = Number(e.total_amount);
+          const paid = Number(e.paid_amount);
+
+          return paid >= total * 0.5 && paid < total;
+        }).length ?? 0;
+
+
+      // MENSUALIDAD PARCIAL
+      const mensualidadParcial =
+        monthlyPayments
+          ?.filter(
+            (p: any) =>
+              Number(p.amount) > 0 &&
+              Number(p.amount) < 1000 // 👈 ajusta al monto real mensual
+          ).length ?? 0;
 
       const matriculasNIO =
         allPayments
@@ -112,6 +137,8 @@ const Dashboard = () => {
         solventes,
         pendientes,
         morosos,
+        matriculaParcial,
+        mensualidadParcial,
         matriculasNIO,
         matriculasUSD,
         mensualidadesNIO,
@@ -119,71 +146,54 @@ const Dashboard = () => {
         pagosMensualidadesHoy: paymentsTodayMonthly ?? 0,
       };
     },
-
-    refetchInterval: 10000,
-    refetchOnWindowFocus: true,
-    refetchOnReconnect: true,
   });
 
   const stats = {
-    totalStudents: data?.totalStudents ?? 0,
-    matriculados: data?.matriculados ?? 0,
-    solventes: data?.solventes ?? 0,
-    pendientes: data?.pendientes ?? 0,
-    morosos: data?.morosos ?? 0,
-    matriculasNIO: data?.matriculasNIO ?? 0,
-    matriculasUSD: data?.matriculasUSD ?? 0,
-    mensualidadesNIO: data?.mensualidadesNIO ?? 0,
-    mensualidadesUSD: data?.mensualidadesUSD ?? 0,
-    pagosMensualidadesHoy: data?.pagosMensualidadesHoy ?? 0,
+    ...data,
   };
-
-
-  useEffect(() => {
-    const channel = supabase
-      .channel("dashboard-live")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "payments" },
-        () => qc.invalidateQueries({ queryKey: ["dashboard"] })
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "students" },
-        () => qc.invalidateQueries({ queryKey: ["dashboard"] })
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "enrollments" },
-        () => qc.invalidateQueries({ queryKey: ["dashboard"] })
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [qc]);
 
   return (
     <DashboardLayout
       title="Dashboard"
       subtitle="Resumen general del sistema escolar"
     >
+      {/* PRIMERA FILA */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <MetricCard title="Total Estudiantes" value={stats.totalStudents} icon={Users} iconColor="text-primary" iconBg="bg-primary/10" />
-        <MetricCard title={`Matriculados ${currentYear}`} value={stats.matriculados} icon={UserCheck} iconColor="text-success" iconBg="bg-success/10" />
-        <MetricCard title={`Solventes ${currentMonthName}`} value={stats.solventes} icon={UserCheck} iconColor="text-info" iconBg="bg-info/10" />
-        <MetricCard title={`Pendientes ${currentMonthName}`} value={stats.pendientes} icon={UserX} iconColor="text-warning" iconBg="bg-warning/10" />
+        <MetricCard title="Total Estudiantes" value={stats?.totalStudents ?? 0} icon={Users} iconColor="text-primary" iconBg="bg-primary/10" />
+        <MetricCard title={`Matriculados ${currentYear}`} value={stats?.matriculados ?? 0} icon={UserCheck} iconColor="text-success" iconBg="bg-success/10" />
+        <MetricCard title={`Solventes ${currentMonthName}`} value={stats?.solventes ?? 0} icon={UserCheck} iconColor="text-info" iconBg="bg-info/10" />
+        <MetricCard title={`Pendientes ${currentMonthName}`} value={stats?.pendientes ?? 0} icon={UserX} iconColor="text-warning" iconBg="bg-warning/10" />
       </div>
 
+      {/* MOROSOS */}
       <div className="grid grid-cols-1 gap-4 mb-6">
-        <MetricCard title={`Morosos ${currentMonthName}`} value={stats.morosos} icon={UserX} iconColor="text-destructive" iconBg="bg-destructive/10" />
+        <MetricCard title={`Morosos ${currentMonthName}`} value={stats?.morosos ?? 0} icon={UserX} iconColor="text-destructive" iconBg="bg-destructive/10" />
       </div>
 
+      {/* PARCIALES NUEVOS */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <MetricCard
+          title="Matrículas Parciales"
+          value={stats?.matriculaParcial ?? 0}
+          icon={Percent}
+          iconColor="text-warning"
+          iconBg="bg-warning/10"
+        />
+
+        <MetricCard
+          title="Mensualidades Parciales"
+          value={stats?.mensualidadParcial ?? 0}
+          icon={Percent}
+          iconColor="text-info"
+          iconBg="bg-info/10"
+        />
+      </div>
+
+      {/* INGRESOS */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <MetricCard
           title={`Matrículas ${currentYear}`}
-          value={`C$${stats.matriculasNIO.toLocaleString()} | $${stats.matriculasUSD.toLocaleString()}`}
+          value={`C$${stats?.matriculasNIO?.toLocaleString() ?? 0} | $${stats?.matriculasUSD?.toLocaleString() ?? 0}`}
           icon={CreditCard}
           iconColor="text-warning"
           iconBg="bg-warning/10"
@@ -191,17 +201,18 @@ const Dashboard = () => {
 
         <MetricCard
           title={`Mensualidades ${currentMonthName}`}
-          value={`C$${stats.mensualidadesNIO.toLocaleString()} | $${stats.mensualidadesUSD.toLocaleString()}`}
+          value={`C$${stats?.mensualidadesNIO?.toLocaleString() ?? 0} | $${stats?.mensualidadesUSD?.toLocaleString() ?? 0}`}
           icon={Calendar}
           iconColor="text-primary"
           iconBg="bg-primary/10"
         />
       </div>
 
+      {/* HOY */}
       <div className="grid grid-cols-1 gap-4 mb-6">
         <MetricCard
           title="Pagos Mensualidades Hoy"
-          value={stats.pagosMensualidadesHoy}
+          value={stats?.pagosMensualidadesHoy ?? 0}
           icon={DollarSign}
           iconColor="text-success"
           iconBg="bg-success/10"

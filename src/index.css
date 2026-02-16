@@ -4,9 +4,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Sistema Contable - Colegio Padre Bruno Martínez
-   Design System: Institutional Blue Theme */
-
 @layer base {
   :root {
     /* Backgrounds */

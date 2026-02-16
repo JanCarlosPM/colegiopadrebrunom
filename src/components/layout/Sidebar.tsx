@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
@@ -14,12 +14,13 @@ import {
   History,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { supabase } from "@/lib/supabase";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Estudiantes", href: "/estudiantes", icon: Users },
   { name: "Matrículas", href: "/matriculas", icon: GraduationCap },
-  { name: "Pagos", href: "/pagos", icon: CreditCard },
+  { name: "Mensualidades", href: "/pagos", icon: CreditCard },
   { name: "Historial", href: "/historial", icon: History },
   { name: "Reportes", href: "/reportes", icon: FileText },
   { name: "Configuración", href: "/configuracion", icon: Settings },
@@ -28,6 +29,12 @@ const navigation = [
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate(); // 👈 agregado
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut(); // 👈 cierra sesión en supabase
+    navigate("/login"); // 👈 redirige al login
+  };
 
   return (
     <aside
@@ -45,7 +52,7 @@ export function Sidebar() {
           {!collapsed && (
             <div className="overflow-hidden">
               <p className="font-semibold text-sidebar-foreground text-sm leading-tight truncate">
-                Colegio P. Bruno
+                Colegio Padre Bruno
               </p>
               <p className="text-xs text-sidebar-foreground/60 truncate">
                 Sistema Contable
@@ -75,10 +82,7 @@ export function Sidebar() {
             <NavLink
               key={item.name}
               to={item.href}
-              className={cn(
-                "nav-item",
-                isActive && "nav-item-active"
-              )}
+              className={cn("nav-item", isActive && "nav-item-active")}
               title={collapsed ? item.name : undefined}
             >
               <item.icon className="h-5 w-5 shrink-0" />
@@ -112,8 +116,11 @@ export function Sidebar() {
             </div>
           )}
         </div>
+
+        {/* BOTÓN CERRAR SESIÓN */}
         <Button
           variant="ghost"
+          onClick={handleLogout} // 👈 aquí
           className={cn(
             "w-full mt-2 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent",
             collapsed ? "px-0" : ""

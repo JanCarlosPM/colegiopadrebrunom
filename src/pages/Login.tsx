@@ -14,26 +14,43 @@ const Login = () => {
   const [password, setPassword] = useState("");
   const navigate = useNavigate();
 
-const handleLogin = async (e: React.FormEvent) => {
-  e.preventDefault();
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
 
-  if (!username || !password) {
-    toast.error("Ingrese usuario y contraseña");
-    return;
-  }
+    if (!username || !password) {
+      toast.error("Ingrese usuario y contraseña");
+      return;
+    }
+    
+    const { error } = await supabase.auth.signInWithPassword({
+      email: username,
+      password,
+    });
 
-  const { error } = await supabase.auth.signInWithPassword({
-    email: username,
-    password,
-  });
+    if (error) {
+      toast.error("Credenciales incorrectas");
+      return;
+    }
 
-  if (error) {
-    toast.error("Credenciales incorrectas");
-    return;
-  }
+    navigate("/dashboard");
+  };
+const handleForgotPassword = async () => {
+      if (!username) {
+        toast.error("Ingrese su correo para recuperar contraseña");
+        return;
+      }
 
-  navigate("/dashboard");
-};
+      const { error } = await supabase.auth.resetPasswordForEmail(username, {
+        redirectTo: "http://localhost:8080/reset-password",
+      });
+
+      if (error) {
+        toast.error("Error al enviar correo");
+        return;
+      }
+
+      toast.success("Se envió un enlace de recuperación a su correo");
+    };
 
 
   return (
@@ -96,21 +113,15 @@ const handleLogin = async (e: React.FormEvent) => {
             </div>
 
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Checkbox id="remember" />
-                <label
-                  htmlFor="remember"
-                  className="text-sm text-muted-foreground cursor-pointer"
-                >
-                  Recordar sesión
-                </label>
-              </div>
-              <a
-                href="#"
+
+              <button
+                type="button"
+                onClick={handleForgotPassword}
                 className="text-sm text-primary font-medium hover:text-primary/80 transition-colors"
               >
                 ¿Olvidó su contraseña?
-              </a>
+              </button>
+
             </div>
 
             <Button type="submit" className="w-full h-11 text-base font-medium">
@@ -119,7 +130,7 @@ const handleLogin = async (e: React.FormEvent) => {
           </form>
 
           <p className="mt-8 text-center text-xs text-muted-foreground">
-            © 2024 Colegio Padre Bruno Martínez. Todos los derechos reservados.
+            © 2026 Colegio Padre Bruno Martínez. Todos los derechos reservados.
           </p>
         </div>
       </div>
@@ -147,20 +158,7 @@ const handleLogin = async (e: React.FormEvent) => {
           <p className="text-primary-foreground/80 max-w-sm text-lg">
             Gestiona matrículas, pagos y reportes financieros de manera eficiente y segura.
           </p>
-          <div className="mt-12 grid grid-cols-3 gap-6">
-            <div className="text-center">
-              <p className="text-3xl font-bold text-primary-foreground">400+</p>
-              <p className="text-primary-foreground/70 text-sm">Estudiantes</p>
-            </div>
-            <div className="text-center">
-              <p className="text-3xl font-bold text-primary-foreground">98%</p>
-              <p className="text-primary-foreground/70 text-sm">Solvencia</p>
-            </div>
-            <div className="text-center">
-              <p className="text-3xl font-bold text-primary-foreground">12</p>
-              <p className="text-primary-foreground/70 text-sm">Grados</p>
-            </div>
-          </div>
+
         </div>
       </div>
     </div>

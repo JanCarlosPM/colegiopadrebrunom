@@ -12,6 +12,7 @@ import Pagos from "./pages/Pagos";
 import Historial from "./pages/Historial";
 import Reportes from "./pages/Reportes";
 import Configuracion from "./pages/Configuracion";
+import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
 
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
@@ -51,6 +52,7 @@ const App = () => {
                 </ProtectedRoute>
               }
             />
+            <Route path="/reset-password" element={<ResetPassword />} />
 
             <Route
               path="/matriculas"

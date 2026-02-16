@@ -63,13 +63,15 @@ const fetchData = async (year: number) => {
   const { data: enrollments } = await supabase
     .from("enrollments")
     .select(`
-      id,
-      total_amount,
-      paid_amount,
-      currency,
-      status,
-      enrolled_at,
-      students (
+  id,
+  student_id,
+  total_amount,
+  paid_amount,
+  currency,
+  status,
+  enrolled_at,
+  students (
+
         full_name,
         grades ( name ),
         sections ( name )
@@ -80,12 +82,26 @@ const fetchData = async (year: number) => {
 
   const { data: students } = await supabase
     .from("students")
-    .select(`id, full_name, guardians ( full_name, phone )`)
+    .select(`
+    id,
+    full_name,
+    guardians ( full_name, phone ),
+    enrollments (
+      id,
+      total_amount,
+      paid_amount,
+      academic_year
+    )
+  `)
     .order("full_name");
+
 
   return { enrollments: enrollments ?? [], students: students ?? [] };
 };
 
+const getEnrollmentByStudent = (studentId: string) => {
+  return enrollments.find((e: any) => e.student_id === studentId);
+};
 
 /* ================= COMPONENT ================= */
 
@@ -97,9 +113,16 @@ export default function Matriculas() {
     queryKey: ["matriculas", year],
     queryFn: () => fetchData(year),
   });
+  const [saldoPendiente, setSaldoPendiente] = useState(0);
 
   const enrollments = data?.enrollments ?? [];
   const students = data?.students ?? [];
+
+  const getEnrollmentByStudent = (studentId: string) => {
+    return enrollments.find((e: any) => e.student_id === studentId);
+  };
+
+
 
   /* ================= STATE ================= */
 
@@ -134,39 +157,74 @@ export default function Matriculas() {
     mutationFn: async () => {
       if (!selectedStudent) throw new Error("NO_STUDENT");
 
-      const { data: exists } = await supabase
+      const now = new Date().toISOString();
+
+      const { data: existing } = await supabase
         .from("enrollments")
-        .select("id")
+        .select("*")
         .eq("student_id", selectedStudent.id)
         .eq("academic_year", year)
         .maybeSingle();
 
-      if (exists) throw new Error("YA_MATRICULADO");
+      if (!existing) {
+        const status = paid < total ? "PARCIAL" : "PAGADO";
 
-      const now = new Date().toISOString();
-
-      await supabase.from("enrollments").insert({
-        student_id: selectedStudent.id,
-        academic_year: year,
-        total_amount: total,
-        paid_amount: paid,
-        change_amount: cambio,
-        currency,
-        status: estado,
-        enrolled_at: now,
-      });
-
-      if (paid > 0) {
-        await supabase.from("payments").insert({
+        await supabase.from("enrollments").insert({
           student_id: selectedStudent.id,
-          concept: "MATRICULA",
-          amount: Math.min(paid, total),
-          currency,
-          method: "EFECTIVO",
           academic_year: year,
-          paid_at: now,
+          total_amount: total,
+          paid_amount: paid,
+          currency,
+          status,
+          enrolled_at: now,
         });
+
+      } else {
+        const totalOriginal = Number(existing.total_amount);
+        const alreadyPaid = Number(existing.paid_amount);
+        const restante = totalOriginal - alreadyPaid;
+
+        if (restante <= 0) {
+          throw new Error("YA_PAGADO");
+        }
+
+        if (paid > restante) {
+          throw new Error("EXCEDE_RESTANTE");
+        }
+
+        const newPaid = alreadyPaid + paid;
+
+        const status =
+          newPaid < totalOriginal
+            ? "PARCIAL"
+            : "PAGADO";
+
+        await supabase
+          .from("enrollments")
+          .update({
+            paid_amount: newPaid,
+            status,
+          })
+          .eq("id", existing.id);
       }
+
+
+      await supabase.from("payments").insert({
+        student_id: selectedStudent.id,
+        concept: "MATRICULA",
+        amount: paid,
+        currency,
+        academic_year: year,
+        paid_at: now,
+      });
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["matriculas", year] });
+
+      setOpenAdd(false);
+      setPaid(0);
+      setSearch("");
+      setSelectedStudent(null);
     },
   });
 
@@ -202,10 +260,36 @@ export default function Matriculas() {
                   <div
                     key={s.id}
                     className="p-2 hover:bg-muted cursor-pointer flex gap-2"
-                    onClick={() => {
+                    onClick={async () => {
+                      const { data: existing } = await supabase
+                        .from("enrollments")
+                        .select("*")
+                        .eq("student_id", s.id)
+                        .eq("academic_year", year)
+                        .maybeSingle();
+
+                      if (existing) {
+                        const totalOriginal = Number(existing.total_amount);
+                        const alreadyPaid = Number(existing.paid_amount);
+                        const restante = totalOriginal - alreadyPaid;
+
+                        setCurrency(existing.currency);
+                        setTotal(totalOriginal);
+                        setSaldoPendiente(restante > 0 ? restante : 0);
+                      } else {
+                        const base = currency === "USD" ? 8 : 300;
+                        setTotal(base);
+                        setSaldoPendiente(base);
+                      }
+
+                      setPaid(0);
                       setSelectedStudent(s);
                       setSearch(s.full_name);
                     }}
+
+
+
+
                   >
                     <User className="h-4 w-4 mt-1" />
                     <div>
@@ -231,7 +315,7 @@ export default function Matriculas() {
                 <label className="text-sm font-medium">Total matrícula</label>
                 <Input
                   type="number"
-                  value={total}
+                  value={saldoPendiente}
                   disabled
                 />
               </div>
@@ -298,16 +382,18 @@ export default function Matriculas() {
               className="w-full mt-6"
               disabled={
                 !selectedStudent ||
-                !currency ||
-                !paid ||
-                paid < total
+                paid <= 0 ||
+                paid > saldoPendiente ||
+                saldoPendiente === 0
               }
+
+
+
               onClick={async () => {
                 try {
                   await createEnrollment.mutateAsync();
 
                   await qc.invalidateQueries({ queryKey: ["matriculas", year] });
-                  qc.invalidateQueries({ queryKey: ["recent-payments"] });
 
                   setOpenAdd(false);
 
@@ -323,11 +409,13 @@ export default function Matriculas() {
                       }),
                     });
                   }, 300);
-                } catch (err: any) {
-                  setOpenAdd(false);
 
-                  if (err.message === "YA_MATRICULADO") {
-                    setInfoMsg(`${selectedStudent.full_name} ya se encuentra matriculado`);
+                } catch (err: any) {
+
+                  if (err.message === "YA_PAGADO") {
+                    setInfoMsg("Esta matrícula ya está completamente pagada.");
+                  } else if (err.message === "EXCEDE_RESTANTE") {
+                    setInfoMsg("El monto excede el saldo pendiente.");
                   } else {
                     setInfoMsg("Error al registrar matrícula");
                   }
@@ -335,6 +423,7 @@ export default function Matriculas() {
                   setOpenInfo(true);
                 }
               }}
+
             >
               Registrar Pago
             </Button>

@@ -188,6 +188,7 @@ export default function Matriculas() {
               <DialogTitle>Pago de Matrícula</DialogTitle>
             </DialogHeader>
 
+            {/* ================= ESTUDIANTE ================= */}
             <label className="text-sm font-medium">Estudiante</label>
             <Input
               placeholder="Buscar estudiante..."
@@ -208,9 +209,9 @@ export default function Matriculas() {
                   >
                     <User className="h-4 w-4 mt-1" />
                     <div>
-                      <p>{s.full_name}</p>
+                      <p className="font-medium">{s.full_name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {s.guardians?.phone}
+                        {s.grades?.name} {s.sections?.name ? `- ${s.sections?.name}` : ""}
                       </p>
                     </div>
                   </div>
@@ -218,13 +219,20 @@ export default function Matriculas() {
               </div>
             )}
 
+            {!selectedStudent && (
+              <p className="text-xs text-red-500 mt-1">
+                Debe seleccionar un estudiante
+              </p>
+            )}
+
+            {/* ================= TOTAL + MONEDA ================= */}
             <div className="grid grid-cols-2 gap-4 mt-4">
               <div>
                 <label className="text-sm font-medium">Total matrícula</label>
                 <Input
                   type="number"
                   value={total}
-                  onChange={(e) => setTotal(+e.target.value)}
+                  disabled
                 />
               </div>
 
@@ -236,7 +244,8 @@ export default function Matriculas() {
                   onChange={(e) => {
                     const v = e.target.value as "NIO" | "USD";
                     setCurrency(v);
-                    setTotal(v === "USD" ? 8 : 300);
+                    setTotal(v === "USD" ? 8 : 300); // ajusta a tu monto real
+                    setPaid(0);
                   }}
                 >
                   <option value="NIO">Córdobas (C$)</option>
@@ -245,24 +254,54 @@ export default function Matriculas() {
               </div>
             </div>
 
+            {/* ================= RECIBIDO + CAMBIO ================= */}
             <div className="grid grid-cols-2 gap-4 mt-4">
               <div>
                 <label className="text-sm font-medium">Recibido</label>
                 <Input
-                  type="number"
-                  value={paid}
-                  onChange={(e) => setPaid(+e.target.value)}
+                  type="text"
+                  value={paid || ""}
+                  maxLength={currency === "USD" ? 3 : 4}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/[^0-9]/g, "");
+
+                    const limited =
+                      currency === "USD"
+                        ? value.slice(0, 3)
+                        : value.slice(0, 4);
+
+                    setPaid(Number(limited));
+                  }}
                 />
+                {!paid && (
+                  <p className="text-xs text-red-500 mt-1">
+                    Campo obligatorio
+                  </p>
+                )}
               </div>
 
               <div>
                 <label className="text-sm font-medium">Cambio</label>
-                <Input disabled value={cambio > 0 ? cambio : ""} />
+                <Input
+                  disabled
+                  value={
+                    cambio > 0
+                      ? `${currency === "USD" ? "$" : "C$"} ${cambio}`
+                      : ""
+                  }
+                />
               </div>
             </div>
 
+            {/* ================= BOTÓN ================= */}
             <Button
               className="w-full mt-6"
+              disabled={
+                !selectedStudent ||
+                !currency ||
+                !paid ||
+                paid < total
+              }
               onClick={async () => {
                 try {
                   await createEnrollment.mutateAsync();
@@ -291,7 +330,6 @@ export default function Matriculas() {
                     setInfoMsg(`${selectedStudent.full_name} ya se encuentra matriculado`);
                   } else {
                     setInfoMsg("Error al registrar matrícula");
-                    console.log(err);
                   }
 
                   setOpenInfo(true);
@@ -301,6 +339,7 @@ export default function Matriculas() {
               Registrar Pago
             </Button>
           </DialogContent>
+
         </Dialog>
       </div>
 
@@ -354,10 +393,10 @@ export default function Matriculas() {
               <TableCell>
                 <span
                   className={`px-2 py-1 rounded text-xs ${e.status === "PAGADO"
-                      ? "bg-green-100 text-green-700"
-                      : e.status === "PARCIAL"
-                        ? "bg-yellow-100 text-yellow-700"
-                        : "bg-red-100 text-red-700"
+                    ? "bg-green-100 text-green-700"
+                    : e.status === "PARCIAL"
+                      ? "bg-yellow-100 text-yellow-700"
+                      : "bg-red-100 text-red-700"
                     }`}
                 >
                   {e.status}

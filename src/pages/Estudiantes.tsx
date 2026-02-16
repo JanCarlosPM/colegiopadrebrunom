@@ -337,14 +337,19 @@ export default function Estudiantes() {
                 <div className="grid grid-cols-2 gap-4">
                   {/* Nombre tutor */}
                   <div>
+                    <label className="text-sm font-medium block mb-1">
+                      Nombre del Padre o Madre
+                    </label>
+
                     <Input
-                      placeholder="Nombre completo"
+                      placeholder="Ingrese nombre completo"
                       value={form.guardian_name}
                       onChange={(e) =>
                         onChange("guardian_name", e.target.value)
                       }
                     />
-                    {form.guardian_name.trim() === "" && (
+
+                    {!form.guardian_name?.trim() && (
                       <p className="text-xs text-red-500 mt-1">
                         El nombre del tutor es obligatorio
                       </p>
@@ -353,21 +358,25 @@ export default function Estudiantes() {
 
                   {/* Teléfono */}
                   <div>
+                    <label className="text-sm font-medium block mb-1">
+                      Teléfono
+                    </label>
+
                     <Input
-                      placeholder="Teléfono"
+                      placeholder="Ingrese teléfono"
                       value={form.guardian_phone}
                       maxLength={8}
                       onChange={(e) =>
                         onChange(
                           "guardian_phone",
                           e.target.value
-                            .replace(/[^0-9]/g, "") // solo números
-                            .slice(0, 8)           // máximo 8 dígitos
+                            .replace(/[^0-9]/g, "")
+                            .slice(0, 8)
                         )
                       }
                     />
 
-                    {form.guardian_phone.trim() === "" && (
+                    {!form.guardian_phone?.trim() && (
                       <p className="text-xs text-red-500 mt-1">
                         El teléfono es obligatorio
                       </p>
@@ -380,9 +389,9 @@ export default function Estudiantes() {
                         </p>
                       )}
                   </div>
-
                 </div>
               </div>
+
 
               {/* BOTÓN */}
               <div className="flex justify-end">
@@ -564,13 +573,18 @@ export default function Estudiantes() {
               <div className="grid grid-cols-2 gap-4">
                 {/* Nombre tutor */}
                 <div>
+                  <label className="text-sm font-medium block mb-1">
+                    Nombre del Padre o Madre
+                  </label>
+
                   <Input
-                    placeholder="Nombre completo"
+                    placeholder="Ingrese nombre completo"
                     value={form.guardian_name || ""}
                     onChange={(e) =>
                       onChange("guardian_name", e.target.value)
                     }
                   />
+
                   {!form.guardian_name?.trim() && (
                     <p className="text-xs text-red-500 mt-1">
                       El nombre del tutor es obligatorio
@@ -580,8 +594,12 @@ export default function Estudiantes() {
 
                 {/* Teléfono */}
                 <div>
+                  <label className="text-sm font-medium block mb-1">
+                    Teléfono
+                  </label>
+
                   <Input
-                    placeholder="Teléfono"
+                    placeholder="Ingrese teléfono"
                     value={form.guardian_phone || ""}
                     maxLength={8}
                     onChange={(e) =>
@@ -593,11 +611,13 @@ export default function Estudiantes() {
                       )
                     }
                   />
+
                   {!form.guardian_phone?.trim() && (
                     <p className="text-xs text-red-500 mt-1">
                       El teléfono es obligatorio
                     </p>
                   )}
+
                   {form.guardian_phone &&
                     form.guardian_phone.length < 8 && (
                       <p className="text-xs text-red-500 mt-1">
@@ -607,6 +627,7 @@ export default function Estudiantes() {
                 </div>
               </div>
             </div>
+
 
             {/* BOTONES */}
             <div className="flex justify-end gap-2">

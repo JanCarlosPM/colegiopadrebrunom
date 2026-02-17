@@ -136,6 +136,7 @@ export default function Matriculas() {
   const [currency, setCurrency] = useState<"NIO" | "USD">("NIO");
   const [total, setTotal] = useState(300);
   const [paid, setPaid] = useState(0);
+  const [tableSearch, setTableSearch] = useState("");
 
   const cambio = Math.max(paid - total, 0);
 
@@ -150,6 +151,32 @@ export default function Matriculas() {
         .includes(search.toLowerCase())
     );
   }, [students, search]);
+  const filteredEnrollments = useMemo(() => {
+    if (!tableSearch) return enrollments;
+
+    return enrollments.filter((e: any) => {
+      const searchValue = tableSearch.toLowerCase();
+
+      const fecha = new Date(e.enrolled_at).toLocaleString("es-NI", {
+        timeZone: "America/Managua",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).toLowerCase();
+
+      return (
+        e.students?.full_name?.toLowerCase().includes(searchValue) ||
+        e.students?.grades?.name?.toLowerCase().includes(searchValue) ||
+        e.students?.sections?.name?.toLowerCase().includes(searchValue) ||
+        String(e.total_amount).includes(searchValue) ||
+        String(e.paid_amount).includes(searchValue) ||
+        e.status?.toLowerCase().includes(searchValue) ||
+        fecha.includes(searchValue)
+      );
+    });
+  }, [enrollments, tableSearch]);
 
   /* ================= MUTATION ================= */
 
@@ -457,6 +484,16 @@ export default function Matriculas() {
         </DialogContent>
       </Dialog>
 
+      {/* BUSCADOR TABLA */}
+      <div className="mb-4">
+        <Input
+          placeholder="Buscar por estudiante, grado, sección, monto, estado o fecha..."
+          value={tableSearch}
+          onChange={(e) => setTableSearch(e.target.value)}
+        />
+      </div>
+
+
       <Table>
         <TableHeader>
           <TableRow>
@@ -472,7 +509,7 @@ export default function Matriculas() {
         </TableHeader>
 
         <TableBody>
-          {enrollments.map((e: any) => (
+          {filteredEnrollments.map((e: any) => (
             <TableRow key={e.id}>
               <TableCell>{e.students?.full_name}</TableCell>
 

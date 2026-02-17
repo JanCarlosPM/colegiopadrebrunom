@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,7 +66,6 @@ function imprimirRecibo(data: any) {
 
 /* ================= FETCHERS ================= */
 
-// 🔥 SOLO TRAE MENSUALIDADES
 const fetchPayments = async () => {
   const { data, error } = await supabase
     .from("payments")
@@ -104,7 +103,7 @@ const fetchStudents = async () => {
   return data ?? [];
 };
 
-const fetchPendingCharges = async () => {
+const fetchPendingCharges = async (currentYear: number) => {
   const { data, error } = await supabase
     .from("charges")
     .select(`
@@ -112,6 +111,7 @@ const fetchPendingCharges = async () => {
       month,
       amount,
       currency,
+      academic_year,
       students (
         id,
         full_name,
@@ -119,18 +119,29 @@ const fetchPendingCharges = async () => {
         sections ( name )
       )
     `)
+    .eq("academic_year", currentYear)
     .in("status", ["PENDIENTE", "MOROSO"]);
 
   if (error) throw error;
   return data ?? [];
 };
 
+
 /* ================= COMPONENT ================= */
 
 export default function Pagos() {
+
   const qc = useQueryClient();
+
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+
+
+
 
   const { data: payments = [] } = useQuery({
     queryKey: ["payments"],
@@ -143,9 +154,10 @@ export default function Pagos() {
   });
 
   const { data: charges = [] } = useQuery({
-    queryKey: ["charges-pending"],
-    queryFn: fetchPendingCharges,
+    queryKey: ["charges-pending", currentYear],
+    queryFn: () => fetchPendingCharges(currentYear),
   });
+
 
 
   const [form, setForm] = useState<any>({
@@ -162,6 +174,51 @@ export default function Pagos() {
   const currency = selectedCharge?.currency ?? "NIO";
   const simbolo = currency === "USD" ? "$" : "C$";
 
+  useEffect(() => {
+    const generarMensualidades = async () => {
+      const { data: enrollments } = await supabase
+        .from("enrollments")
+        .select("student_id")
+        .eq("academic_year", currentYear);
+
+      if (!enrollments) return;
+
+      for (const e of enrollments) {
+        // 👇 recorrer desde enero hasta mes actual
+        for (let mes = 1; mes <= currentMonth; mes++) {
+          const { data: existing } = await supabase
+            .from("charges")
+            .select("id")
+            .eq("student_id", e.student_id)
+            .eq("academic_year", currentYear) 
+            .eq("month", mes)
+            .maybeSingle();
+
+
+          if (!existing) {
+            await supabase.from("charges").insert({
+              student_id: e.student_id,
+              academic_year: currentYear,
+              concept: "MENSUALIDAD",
+              month: mes,
+              amount: 1000,
+              currency: "NIO",
+              status: "PENDIENTE",
+            });
+
+
+          }
+        }
+      }
+
+      qc.invalidateQueries({ queryKey: ["charges-pending"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    };
+
+    generarMensualidades();
+  }, [currentYear, currentMonth]);
+
+
   const cambio =
     form.recibido > total ? form.recibido - total : 0;
 
@@ -173,6 +230,9 @@ export default function Pagos() {
       if (!selectedCharge) throw new Error("No charge");
 
       const now = new Date().toISOString();
+      const currentYear = now.getFullYear();
+      const currentMonth = now.getMonth() + 1;
+
 
       await supabase.from("payments").insert({
         student_id: selectedCharge.students.id,

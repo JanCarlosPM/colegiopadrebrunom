@@ -39,7 +39,7 @@ const Dashboard = () => {
 
         supabase
           .from("enrollments")
-          .select("student_id, total_amount, paid_amount")
+          .select("student_id, total_amount, paid_amount, status")
           .eq("academic_year", currentYear),
 
         supabase
@@ -84,13 +84,7 @@ const Dashboard = () => {
 
       // MATRÍCULA PARCIAL
       const matriculaParcial =
-        enrollments?.filter((e: any) => {
-          const total = Number(e.total_amount);
-          const paid = Number(e.paid_amount);
-
-          return paid >= total * 0.5 && paid < total;
-        }).length ?? 0;
-
+        enrollments?.filter((e: any) => e.status === "PARCIAL").length ?? 0;
 
       // MENSUALIDAD PARCIAL
       const mensualidadParcial =

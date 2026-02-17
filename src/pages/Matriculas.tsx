@@ -166,14 +166,22 @@ export default function Matriculas() {
         .eq("academic_year", year)
         .maybeSingle();
 
+      let montoAplicado = 0;
+
       if (!existing) {
-        const status = paid < total ? "PARCIAL" : "PAGADO";
+        // PRIMER PAGO
+        montoAplicado = Math.min(paid, total);
+
+        const status =
+          montoAplicado < total
+            ? "PARCIAL"
+            : "PAGADO";
 
         await supabase.from("enrollments").insert({
           student_id: selectedStudent.id,
           academic_year: year,
           total_amount: total,
-          paid_amount: paid,
+          paid_amount: montoAplicado,
           currency,
           status,
           enrolled_at: now,
@@ -188,11 +196,13 @@ export default function Matriculas() {
           throw new Error("YA_PAGADO");
         }
 
-        if (paid > restante) {
-          throw new Error("EXCEDE_RESTANTE");
+        montoAplicado = Math.min(paid, restante);
+
+        if (montoAplicado <= 0) {
+          throw new Error("YA_PAGADO");
         }
 
-        const newPaid = alreadyPaid + paid;
+        const newPaid = alreadyPaid + montoAplicado;
 
         const status =
           newPaid < totalOriginal
@@ -208,16 +218,18 @@ export default function Matriculas() {
           .eq("id", existing.id);
       }
 
-
+      // Registrar pago REAL aplicado
       await supabase.from("payments").insert({
         student_id: selectedStudent.id,
         concept: "MATRICULA",
-        amount: paid,
+        amount: montoAplicado,
         currency,
         academic_year: year,
         paid_at: now,
       });
-    },
+    }
+    ,
+
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["matriculas", year] });
 
@@ -227,6 +239,7 @@ export default function Matriculas() {
       setSelectedStudent(null);
     },
   });
+
 
   /* ================= UI ================= */
 
@@ -274,9 +287,11 @@ export default function Matriculas() {
                         const restante = totalOriginal - alreadyPaid;
 
                         setCurrency(existing.currency);
-                        setTotal(totalOriginal);
-                        setSaldoPendiente(restante > 0 ? restante : 0);
-                      } else {
+
+                        setTotal(totalOriginal); // 👈 SIEMPRE EL TOTAL REAL
+                        setSaldoPendiente(Math.max(restante, 0)); // 👈 SOLO LO QUE FALTA
+                      }
+                      else {
                         const base = currency === "USD" ? 8 : 300;
                         setTotal(base);
                         setSaldoPendiente(base);
@@ -318,6 +333,7 @@ export default function Matriculas() {
                   value={saldoPendiente}
                   disabled
                 />
+
               </div>
 
               <div>
@@ -328,7 +344,7 @@ export default function Matriculas() {
                   onChange={(e) => {
                     const v = e.target.value as "NIO" | "USD";
                     setCurrency(v);
-                    setTotal(v === "USD" ? 8 : 300); // ajusta a tu monto real
+                    setTotal(v === "USD" ? 8 : 300);
                     setPaid(0);
                   }}
                 >
@@ -383,11 +399,8 @@ export default function Matriculas() {
               disabled={
                 !selectedStudent ||
                 paid <= 0 ||
-                paid > saldoPendiente ||
                 saldoPendiente === 0
               }
-
-
 
               onClick={async () => {
                 try {

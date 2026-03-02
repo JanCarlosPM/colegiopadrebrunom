@@ -63,15 +63,14 @@ const fetchData = async (year: number) => {
   const { data: enrollments } = await supabase
     .from("enrollments")
     .select(`
-  id,
-  student_id,
-  total_amount,
-  paid_amount,
-  currency,
-  status,
-  enrolled_at,
-  students (
-
+      id,
+      student_id,
+      total_amount,
+      paid_amount,
+      currency,
+      status,
+      enrolled_at,
+      students (
         full_name,
         grades ( name ),
         sections ( name )
@@ -83,18 +82,13 @@ const fetchData = async (year: number) => {
   const { data: students } = await supabase
     .from("students")
     .select(`
-    id,
-    full_name,
-    guardians ( full_name, phone ),
-    enrollments (
       id,
-      total_amount,
-      paid_amount,
-      academic_year
-    )
-  `)
+      full_name,
+      grades ( name ),
+      sections ( name ),
+      guardians ( full_name, phone )
+    `)
     .order("full_name");
-
 
   return { enrollments: enrollments ?? [], students: students ?? [] };
 };
@@ -107,8 +101,9 @@ const getEnrollmentByStudent = (studentId: string) => {
 
 export default function Matriculas() {
   const qc = useQueryClient();
-  const year = new Date().getFullYear();
 
+  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(currentYear);
   const { data } = useQuery({
     queryKey: ["matriculas", year],
     queryFn: () => fetchData(year),
@@ -138,7 +133,7 @@ export default function Matriculas() {
   const [paid, setPaid] = useState(0);
   const [tableSearch, setTableSearch] = useState("");
 
-  const cambio = Math.max(paid - total, 0);
+  const cambio = Math.max(paid - saldoPendiente, 0);
 
   const estado =
     paid === 0 ? "PENDIENTE" : paid < total ? "PARCIAL" : "PAGADO";
@@ -146,7 +141,7 @@ export default function Matriculas() {
   const filteredStudents = useMemo(() => {
     if (!search) return [];
     return students.filter((s: any) =>
-      `${s.full_name} ${s.guardians?.full_name} ${s.guardians?.phone}`
+      `${s.full_name} ${s.grades?.name ?? ""} ${s.sections?.name ?? ""}`
         .toLowerCase()
         .includes(search.toLowerCase())
     );
@@ -313,12 +308,11 @@ export default function Matriculas() {
                         const alreadyPaid = Number(existing.paid_amount);
                         const restante = totalOriginal - alreadyPaid;
 
-                        setCurrency(existing.currency);
+                        setTotal(totalOriginal);
+                        setSaldoPendiente(Math.max(restante, 0));
 
-                        setTotal(totalOriginal); // 👈 SIEMPRE EL TOTAL REAL
-                        setSaldoPendiente(Math.max(restante, 0)); // 👈 SOLO LO QUE FALTA
-                      }
-                      else {
+                        setCurrency(existing.currency);
+                      } else {
                         const base = currency === "USD" ? 8 : 300;
                         setTotal(base);
                         setSaldoPendiente(base);
@@ -371,7 +365,27 @@ export default function Matriculas() {
                   onChange={(e) => {
                     const v = e.target.value as "NIO" | "USD";
                     setCurrency(v);
-                    setTotal(v === "USD" ? 8 : 300);
+
+                    if (selectedStudent) {
+                      const enrollment = enrollments.find(
+                        (en: any) => en.student_id === selectedStudent.id
+                      );
+
+                      if (enrollment) {
+                        const restante =
+                          Number(enrollment.total_amount) - Number(enrollment.paid_amount);
+
+                        const tasa = 36;
+
+                        const convertido =
+                          v === "USD"
+                            ? restante / tasa
+                            : restante * tasa;
+
+                        setSaldoPendiente(Math.max(convertido, 0));
+                      }
+                    }
+
                     setPaid(0);
                   }}
                 >
@@ -483,15 +497,44 @@ export default function Matriculas() {
           </Button>
         </DialogContent>
       </Dialog>
+    
+    {/* FILTRO AÑO + BUSCADOR */}
+<div className="flex flex-col md:flex-row md:items-end gap-4 mb-4">
 
-      {/* BUSCADOR TABLA */}
-      <div className="mb-4">
-        <Input
-          placeholder="Buscar por estudiante, grado, sección, monto, estado o fecha..."
-          value={tableSearch}
-          onChange={(e) => setTableSearch(e.target.value)}
-        />
-      </div>
+  {/* Año */}
+  <div className="w-full md:w-40">
+    <label className="text-sm font-medium block mb-1">
+      Año
+    </label>
+    <select
+      className="w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+      value={year}
+      onChange={(e) => setYear(Number(e.target.value))}
+    >
+      {Array.from({ length: 5 }).map((_, i) => {
+        const y = currentYear - i;
+        return (
+          <option key={y} value={y}>
+            {y}
+          </option>
+        );
+      })}
+    </select>
+  </div>
+
+  {/* Buscador */}
+  <div className="flex-1">
+    <label className="text-sm font-medium block mb-1">
+      Buscar
+    </label>
+    <Input
+      placeholder="Estudiante, grado, sección, monto, estado o fecha..."
+      value={tableSearch}
+      onChange={(e) => setTableSearch(e.target.value)}
+    />
+  </div>
+
+</div>
 
 
       <Table>

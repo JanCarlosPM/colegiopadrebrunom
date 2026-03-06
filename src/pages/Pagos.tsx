@@ -65,6 +65,17 @@ function imprimirRecibo(data: any) {
 }
 
 /* ================= FETCHERS ================= */
+const fetchCurrentAcademicYear = async () => {
+  const { data, error } = await supabase
+    .from("school_settings")
+    .select("current_academic_year")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data?.current_academic_year ?? new Date().getFullYear();
+};
 
 const fetchPayments = async () => {
   const { data, error } = await supabase
@@ -102,46 +113,42 @@ const fetchStudents = async () => {
   if (error) throw error;
   return data ?? [];
 };
-
 const fetchPendingCharges = async (currentYear: number) => {
   const { data, error } = await supabase
     .from("charges")
     .select(`
       id,
+      student_id,
       month,
       amount,
       currency,
       academic_year,
-      students (
-        id,
-        full_name,
-        grades ( name ),
-        sections ( name )
-      )
+      concept,
+      status
     `)
     .eq("academic_year", currentYear)
-    .in("status", ["PENDIENTE", "MOROSO"]);
+    .eq("concept", "MENSUALIDAD")
+    .eq("status", "PENDIENTE")
+    .order("month");
 
   if (error) throw error;
   return data ?? [];
 };
-
-
 /* ================= COMPONENT ================= */
 
 export default function Pagos() {
 
   const qc = useQueryClient();
 
+  const { data: academicYear } = useQuery({
+    queryKey: ["academic-year"],
+    queryFn: fetchCurrentAcademicYear,
+  });
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
 
   const now = new Date();
-  const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
-
-
-
 
   const { data: payments = [] } = useQuery({
     queryKey: ["payments"],
@@ -153,60 +160,86 @@ export default function Pagos() {
     queryFn: fetchStudents,
   });
 
-  const { data: charges = [] } = useQuery({
-    queryKey: ["charges-pending", currentYear],
-    queryFn: () => fetchPendingCharges(currentYear),
+  const {
+    data: charges = [],
+    error: chargesError,
+    isError: chargesIsError,
+    isLoading: chargesLoading,
+  } = useQuery({
+    queryKey: ["charges-pending", academicYear],
+    enabled: !!academicYear,
+    queryFn: () => fetchPendingCharges(academicYear!),
   });
+
+  useEffect(() => {
+    if (chargesIsError) console.error("ERROR charges:", chargesError);
+    console.log("academicYear:", academicYear, "charges:", charges.length, charges.slice(0, 3));
+  }, [chargesIsError, chargesError, charges, academicYear]);
 
 
 
   const [form, setForm] = useState<any>({
     student_id: "",
     charge_id: "",
-    recibido: 0,
+    recibido: "",
+    pay_currency: "USD", // o "NIO"
   });
 
   const selectedCharge = charges.find(
     (c: any) => c.id === form.charge_id
   );
 
+  const RATE_USD_TO_NIO = 36.5;
+
   const total = selectedCharge?.amount ?? 0;
-  const currency = selectedCharge?.currency ?? "NIO";
-  const simbolo = currency === "USD" ? "$" : "C$";
+  const chargeCurrency = selectedCharge?.currency ?? "USD"; // moneda del cargo
+  const payCurrency = form.pay_currency ?? "USD";
+
+  const recibidoNum = Number(form.recibido || 0);
+
+  // convertir total a moneda de pago
+  const totalInPayCurrency =
+    chargeCurrency === payCurrency
+      ? total
+      : chargeCurrency === "USD" && payCurrency === "NIO"
+        ? total * RATE_USD_TO_NIO
+        : total / RATE_USD_TO_NIO;
+
+
+  const simboloPago = payCurrency === "USD" ? "$" : "C$";
 
   useEffect(() => {
+    if (!academicYear) return;
+
     const generarMensualidades = async () => {
-      const { data: enrollments } = await supabase
+      const { data: enrollments, error } = await supabase
         .from("enrollments")
         .select("student_id")
-        .eq("academic_year", currentYear);
+        .eq("academic_year", academicYear);
 
-      if (!enrollments) return;
+      if (error || !enrollments) return;
 
       for (const e of enrollments) {
-        // 👇 recorrer desde enero hasta mes actual
         for (let mes = 1; mes <= currentMonth; mes++) {
           const { data: existing } = await supabase
             .from("charges")
             .select("id")
             .eq("student_id", e.student_id)
-            .eq("academic_year", currentYear) 
+            .eq("academic_year", academicYear)
+            .eq("concept", "MENSUALIDAD")
             .eq("month", mes)
             .maybeSingle();
-
 
           if (!existing) {
             await supabase.from("charges").insert({
               student_id: e.student_id,
-              academic_year: currentYear,
+              academic_year: academicYear,
               concept: "MENSUALIDAD",
               month: mes,
-              amount: 1000,
-              currency: "NIO",
+              amount: 21,          // ✅ monto base
+              currency: "USD",     // ✅ moneda base
               status: "PENDIENTE",
             });
-
-
           }
         }
       }
@@ -216,8 +249,7 @@ export default function Pagos() {
     };
 
     generarMensualidades();
-  }, [currentYear, currentMonth]);
-
+  }, [academicYear, currentMonth, qc]);
 
   const cambio =
     form.recibido > total ? form.recibido - total : 0;
@@ -229,30 +261,32 @@ export default function Pagos() {
     mutationFn: async () => {
       if (!selectedCharge) throw new Error("No charge");
 
-      const now = new Date().toISOString();
-      const currentYear = now.getFullYear();
-      const currentMonth = now.getMonth() + 1;
-
+      const paidAt = new Date().toISOString();
+      const payCurrency = form.pay_currency ?? "USD";
 
       await supabase.from("payments").insert({
-        student_id: selectedCharge.students.id,
+        student_id: selectedCharge.student_id,
         charge_id: selectedCharge.id,
         concept: "MENSUALIDAD",
         month: selectedCharge.month,
-        amount: total,
-        currency: selectedCharge.currency,
+        amount: totalInPayCurrency,   // ✅ en moneda de pago
+        currency: payCurrency,        // ✅ USD o NIO
         method: "EFECTIVO",
-        paid_at: now,
+        paid_at: paidAt,
       });
+     
 
-      await supabase
+      // 2) Update charge status
+      const { error: chErr } = await supabase
         .from("charges")
         .update({ status: "PAGADO" })
         .eq("id", selectedCharge.id);
+      if (chErr) throw chErr;
 
-      return now;
+      return paidAt;
     },
-    onSuccess: (now) => {
+
+    onSuccess: (paidAt) => {
       qc.invalidateQueries({ queryKey: ["payments"] });
       qc.invalidateQueries({ queryKey: ["charges-pending"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
@@ -260,18 +294,20 @@ export default function Pagos() {
       setOpen(false);
 
       imprimirRecibo({
-        estudiante: selectedCharge.students.full_name,
+        estudiante: search,
         mes: selectedCharge.month,
         total,
         recibido: form.recibido,
         cambio,
         moneda: simbolo,
-        fecha: new Date(now).toLocaleString("es-NI", {
+        fecha: new Date(paidAt).toLocaleString("es-NI", {
           timeZone: "America/Managua",
         }),
       });
 
-      setForm({ charge_id: "", recibido: 0 });
+      // ✅ REINICIAR TODO BIEN
+      setForm({ student_id: "", charge_id: "", recibido: 0 });
+      setSearch("");
     },
   });
 
@@ -282,6 +318,7 @@ export default function Pagos() {
       .toLowerCase()
       .includes(search.toLowerCase())
   );
+
 
   /* ================= UI ================= */
 
@@ -357,15 +394,12 @@ export default function Pagos() {
 
                   {(() => {
                     const studentCharges = charges
-                      .filter((c: any) =>
-                        String(c.students?.id) === String(form.student_id)
-                      )
+                      .filter((c: any) => String(c.student_id) === String(form.student_id))
                       .sort((a: any, b: any) => a.month - b.month);
-
                     if (studentCharges.length === 0) {
                       return (
                         <p className="text-sm text-muted-foreground mt-2">
-                          Este estudiante no tiene mensualidades pendientes.
+                          Este estudiante no tiene mensualidades
                         </p>
                       );
                     }
@@ -404,25 +438,18 @@ export default function Pagos() {
                         <label className="text-sm font-medium">
                           Total mensualidad
                         </label>
-                        <Input
-                          disabled
-                          value={`${simbolo} ${total}`}
-                        />
+                        <Input disabled value={`${simboloPago} ${totalInPayCurrency.toFixed(2)}`} />
                       </div>
 
-                      <div>
-                        <label className="text-sm font-medium">
-                          Moneda
-                        </label>
-                        <Input
-                          disabled
-                          value={
-                            currency === "USD"
-                              ? "Dólares ($)"
-                              : "Córdobas (C$)"
-                          }
-                        />
-                      </div>
+                      <label className="text-sm font-medium mt-4">Moneda de pago</label>
+                      <select
+                        className="w-full border rounded px-3 py-2"
+                        value={form.pay_currency}
+                        onChange={(e) => setForm({ ...form, pay_currency: e.target.value })}
+                      >
+                        <option value="USD">Dólares ($)</option>
+                        <option value="NIO">Córdobas (C$)</option>
+                      </select>
                     </div>
 
                     {/* ================= RECIBIDO ================= */}
@@ -432,15 +459,15 @@ export default function Pagos() {
                         <label className="text-sm font-medium">
                           Recibido
                         </label>
+
                         <Input
-                          type="number"
-                          value={form.recibido}
-                          onChange={(e) =>
-                            setForm({
-                              ...form,
-                              recibido: Number(e.target.value),
-                            })
-                          }
+                          inputMode="text"
+                          pattern="[0-9]*"
+                          value={String(form.recibido ?? "")}
+                          onChange={(e) => {
+                            const onlyDigits = e.target.value.replace(/\D/g, "");
+                            setForm({ ...form, recibido: onlyDigits });
+                          }}
                         />
                       </div>
 
@@ -448,10 +475,7 @@ export default function Pagos() {
                         <label className="text-sm font-medium">
                           Cambio
                         </label>
-                        <Input
-                          disabled
-                          value={cambio > 0 ? cambio : ""}
-                        />
+                        <Input disabled value={cambio > 0 ? `${simboloPago} ${cambio.toFixed(2)}` : ""} />
                       </div>
                     </div>
 
@@ -461,55 +485,12 @@ export default function Pagos() {
                       className="w-full mt-6"
                       disabled={
                         !form.charge_id ||
-                        form.recibido < total
+                        form.recibido < total ||
+                        createPayment.isPending
                       }
-                      onClick={async () => {
-                        const now = new Date().toISOString();
-
-                        await supabase.from("payments").insert({
-                          student_id: form.student_id,
-                          charge_id: form.charge_id,
-                          concept: "MENSUALIDAD",
-                          month: selectedCharge.month,
-                          amount: total,
-                          currency,
-                          method: "EFECTIVO",
-                          paid_at: now,
-                        });
-
-                        await supabase
-                          .from("charges")
-                          .update({ status: "PAGADO" })
-                          .eq("id", form.charge_id);
-
-                        qc.invalidateQueries({ queryKey: ["payments"] });
-                        qc.invalidateQueries({ queryKey: ["charges-pending"] });
-                        qc.invalidateQueries({ queryKey: ["dashboard"] });
-
-                        setOpen(false);
-
-                        imprimirRecibo({
-                          estudiante:
-                            selectedCharge.students.full_name,
-                          mes: selectedCharge.month,
-                          total,
-                          recibido: form.recibido,
-                          cambio,
-                          moneda: simbolo,
-                          fecha: new Date(now).toLocaleString("es-NI", {
-                            timeZone: "America/Managua",
-                          }),
-                        });
-
-                        setForm({
-                          student_id: "",
-                          charge_id: "",
-                          recibido: 0,
-                        });
-                        setSearch("");
-                      }}
+                      onClick={() => createPayment.mutate()}
                     >
-                      Registrar Pago
+                      {createPayment.isPending ? "Registrando..." : "Registrar Pago"}
                     </Button>
                   </>
                 )}

@@ -21,7 +21,6 @@ const MONTHS = [
 ========================= */
 
 export default function Historial() {
-
   const [students, setStudents] = useState<any[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
   const [search, setSearch] = useState("");
@@ -38,7 +37,7 @@ export default function Historial() {
 
   useEffect(() => {
     const fetchStudents = async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("students")
         .select(`
           id,
@@ -49,6 +48,11 @@ export default function Historial() {
         `)
         .order("full_name");
 
+      if (error) {
+        console.error("Error cargando estudiantes:", error);
+        return;
+      }
+
       setStudents(data || []);
     };
 
@@ -56,49 +60,107 @@ export default function Historial() {
   }, []);
 
   /* =========================
-     FETCH DATA WHEN SELECTED
+     FETCH DATA
+  ========================= */
+
+  const fetchStudentData = async (studentId: string) => {
+    const { data: enrollmentData, error: enrollmentError } = await supabase
+      .from("enrollments")
+      .select("*")
+      .eq("student_id", studentId)
+      .eq("academic_year", currentYear)
+      .maybeSingle();
+
+    const { data: paymentsData, error: paymentsError } = await supabase
+      .from("payments")
+      .select("*")
+      .eq("student_id", studentId)
+      .eq("concept", "MENSUALIDAD")
+      .eq("academic_year", currentYear)
+      .order("month", { ascending: true });
+
+    const { data: chargesData, error: chargesError } = await supabase
+      .from("charges")
+      .select("*")
+      .eq("student_id", studentId)
+      .eq("concept", "MENSUALIDAD")
+      .eq("academic_year", currentYear)
+      .order("month", { ascending: true });
+
+    if (enrollmentError) console.error("Error enrollment:", enrollmentError);
+    if (paymentsError) console.error("Error payments:", paymentsError);
+    if (chargesError) console.error("Error charges:", chargesError);
+
+    setEnrollment(enrollmentData || null);
+    setPayments(paymentsData || []);
+    setCharges(chargesData || []);
+  };
+
+  useEffect(() => {
+    if (!selectedStudent) return;
+    fetchStudentData(selectedStudent.id);
+  }, [selectedStudent, currentYear]);
+
+  /* =========================
+     REALTIME: ACTUALIZAR AL TOQUE
   ========================= */
 
   useEffect(() => {
     if (!selectedStudent) return;
 
-    const fetchData = async () => {
+    const channel = supabase
+      .channel(`historial-${selectedStudent.id}-${currentYear}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "payments",
+          filter: `student_id=eq.${selectedStudent.id}`,
+        },
+        () => {
+          fetchStudentData(selectedStudent.id);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "charges",
+          filter: `student_id=eq.${selectedStudent.id}`,
+        },
+        () => {
+          fetchStudentData(selectedStudent.id);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "enrollments",
+          filter: `student_id=eq.${selectedStudent.id}`,
+        },
+        () => {
+          fetchStudentData(selectedStudent.id);
+        }
+      )
+      .subscribe();
 
-      const { data: enrollmentData } = await supabase
-        .from("enrollments")
-        .select("*")
-        .eq("student_id", selectedStudent.id)
-        .eq("academic_year", currentYear)
-        .single();
-
-      const { data: paymentsData } = await supabase
-        .from("payments")
-        .select("*")
-        .eq("student_id", selectedStudent.id)
-        .eq("concept", "MENSUALIDAD")
-        .eq("academic_year", currentYear);
-
-      const { data: chargesData } = await supabase
-        .from("charges")
-        .select("*")
-        .eq("student_id", selectedStudent.id)
-        .eq("concept", "MENSUALIDAD")
-        .eq("academic_year", currentYear);
-
-      setEnrollment(enrollmentData);
-      setPayments(paymentsData || []);
-      setCharges(chargesData || []);
+    return () => {
+      supabase.removeChannel(channel);
     };
-
-    fetchData();
-  }, [selectedStudent]);
+  }, [selectedStudent, currentYear]);
 
   /* =========================
      FILTRO BUSCADOR
   ========================= */
 
   const filteredStudents = students.filter((s) =>
-    s.full_name.toLowerCase().includes(search.toLowerCase())
+    `${s.full_name} ${s.grades?.name ?? ""} ${s.sections?.name ?? ""}`
+      .toLowerCase()
+      .includes(search.toLowerCase())
   );
 
   /* =========================
@@ -106,24 +168,41 @@ export default function Historial() {
   ========================= */
 
   const totalPaid = useMemo(() => {
-    const monthly = payments.reduce((sum, p) => sum + Number(p.amount), 0);
-    const enrollmentPaid = enrollment?.amount_paid || 0;
-    return monthly + enrollmentPaid;
-  }, [payments, enrollment]);
+    return payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  }, [payments]);
 
-  const monthsPaid = payments.length;
-  const totalMonths = 12;
-  const pendingMonths = totalMonths - monthsPaid;
+  const totalPending = useMemo(() => {
+    return charges
+      .filter((c) => c.status !== "PAGADO")
+      .reduce((sum, c) => sum + Number(c.amount || 0), 0);
+  }, [charges]);
 
-  const totalPending = charges
-    .filter((c) => c.status !== "PAGADO")
-    .reduce((sum, c) => sum + Number(c.amount), 0);
+  const paidMonthsSet = useMemo(() => {
+    return new Set(
+      payments
+        .filter((p) => p.month != null)
+        .map((p) => Number(p.month))
+    );
+  }, [payments]);
+
+  const monthsPaid = useMemo(() => {
+    return paidMonthsSet.size;
+  }, [paidMonthsSet]);
+
+  const pendingMonths = useMemo(() => {
+    const chargedMonths = new Set(
+      charges
+        .filter((c) => c.month != null)
+        .map((c) => Number(c.month))
+    );
+
+    return [...chargedMonths].filter((m) => !paidMonthsSet.has(m)).length;
+  }, [charges, paidMonthsSet]);
 
   const generalStatus =
-    totalPending > 0 || enrollment?.status !== "PAGADO"
+    pendingMonths > 0 || enrollment?.status !== "PAGADO"
       ? "Moroso"
       : "Solvente";
-
   /* =========================
      UI
   ========================= */
@@ -142,17 +221,22 @@ export default function Historial() {
         />
 
         {search && (
-          <div className="border rounded mt-2 max-h-40 overflow-y-auto bg-white">
+          <div className="border rounded mt-2 max-h-48 overflow-y-auto bg-white">
             {filteredStudents.map((s) => (
               <div
                 key={s.id}
                 className="p-2 hover:bg-muted cursor-pointer"
-                onClick={() => {
+                onClick={async () => {
                   setSelectedStudent(s);
                   setSearch(s.full_name);
+                  await fetchStudentData(s.id);
                 }}
               >
-                {s.full_name}
+                <p className="font-medium">{s.full_name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {s.grades?.name ?? "Sin grado"}
+                  {s.sections?.name ? ` — Sección ${s.sections.name}` : ""}
+                </p>
               </div>
             ))}
           </div>
@@ -190,11 +274,11 @@ export default function Historial() {
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div>
                 <span className="text-muted-foreground">Padre/Madre:</span>{" "}
-                {selectedStudent.guardians?.full_name}
+                {selectedStudent.guardians?.full_name ?? "—"}
               </div>
               <div>
                 <span className="text-muted-foreground">Teléfono:</span>{" "}
-                {selectedStudent.guardians?.phone}
+                {selectedStudent.guardians?.phone ?? "—"}
               </div>
             </div>
           </div>
@@ -238,16 +322,26 @@ export default function Historial() {
 
             {enrollment ? (
               <div className="flex items-center gap-4 text-sm">
-                <span>Total: C$ {enrollment.total_amount}</span>
-                <span>Pagado: C$ {enrollment.amount_paid}</span>
-                <Badge>
+                <span>Total: C$ {Number(enrollment.total_amount || 0).toLocaleString()}</span>
+                <Badge
+                  className={
+                    enrollment.status === "PAGADO"
+                      ? "bg-green-100 text-green-700"
+                      : enrollment.status === "PARCIAL"
+                        ? "bg-yellow-100 text-yellow-700"
+                        : "bg-red-100 text-red-700"
+                  }
+                >
                   {enrollment.status}
                 </Badge>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">
-                Sin matrícula registrada
-              </p>
+              <div className="flex items-center gap-4 text-sm">
+                <span>Total: C$ 0</span>
+                <Badge className="bg-red-100 text-red-700">
+                  PENDIENTE
+                </Badge>
+              </div>
             )}
           </div>
 
@@ -272,13 +366,44 @@ export default function Historial() {
 
                 <TableBody>
                   {MONTHS.map((m, i) => {
-                    const payment = payments.find(
-                      (p) => p.month === i + 1
+                    const monthNumber = i + 1;
+
+                    const monthCharges = charges.filter(
+                      (c) => Number(c.month) === monthNumber
                     );
 
-                    const charge = charges.find(
-                      (c) => c.month === i + 1
+                    const monthPayments = payments.filter(
+                      (p) => Number(p.month) === monthNumber
                     );
+
+                    const latestCharge =
+                      monthCharges.length > 0
+                        ? [...monthCharges].sort(
+                          (a, b) =>
+                            new Date(b.created_at || 0).getTime() -
+                            new Date(a.created_at || 0).getTime()
+                        )[0]
+                        : null;
+
+                    const latestPayment =
+                      monthPayments.length > 0
+                        ? [...monthPayments].sort(
+                          (a, b) =>
+                            new Date(b.paid_at || 0).getTime() -
+                            new Date(a.paid_at || 0).getTime()
+                        )[0]
+                        : null;
+
+                    const estadoMes = latestPayment
+                      ? "Pagado"
+                      : latestCharge?.status === "PARCIAL"
+                        ? "Parcial"
+                        : latestCharge
+                          ? "Pendiente"
+                          : "—";
+
+                    const montoMes = latestPayment?.amount ?? latestCharge?.amount ?? 0;
+                    const monedaMes = latestPayment?.currency ?? latestCharge?.currency ?? "NIO";
 
                     return (
                       <TableRow key={i}>
@@ -287,24 +412,30 @@ export default function Historial() {
                         </TableCell>
 
                         <TableCell>
-                          {charge ? `C$ ${charge.amount}` : "—"}
+                          {latestCharge || latestPayment
+                            ? `${monedaMes === "USD" ? "$" : "C$"} ${Number(montoMes).toLocaleString()}`
+                            : "—"}
                         </TableCell>
 
                         <TableCell>
-                          {payment
-                            ? new Date(payment.paid_at).toLocaleDateString("es-NI")
+                          {latestPayment?.paid_at
+                            ? new Date(latestPayment.paid_at).toLocaleDateString("es-NI")
                             : "—"}
                         </TableCell>
 
                         <TableCell>
                           <Badge
                             className={
-                              payment
+                              estadoMes === "Pagado"
                                 ? "bg-green-100 text-green-700"
-                                : "bg-red-100 text-red-700"
+                                : estadoMes === "Parcial"
+                                  ? "bg-yellow-100 text-yellow-700"
+                                  : estadoMes === "Pendiente"
+                                    ? "bg-red-100 text-red-700"
+                                    : "bg-gray-100 text-gray-700"
                             }
                           >
-                            {payment ? "Pagado" : "Pendiente"}
+                            {estadoMes}
                           </Badge>
                         </TableCell>
                       </TableRow>

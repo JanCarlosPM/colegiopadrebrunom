@@ -3,12 +3,10 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import { useQuery } from "@tanstack/react-query";
 
-const methodColors: Record<string, string> = {
-  EFECTIVO: "bg-success/10 text-success border-success/20",
-  TRANSFERENCIA: "bg-info/10 text-info border-info/20",
-  POS: "bg-warning/10 text-warning border-warning/20",
-  POCKET: "bg-primary/10 text-primary border-primary/20",
-};
+const MONTHS = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+];
 
 function formatNicaraguaTime(dateString: string) {
   const date = new Date(dateString);
@@ -27,6 +25,27 @@ function capitalize(text: string) {
   return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
 }
 
+function getMethodLabel(payment: any) {
+  if (payment.currency === "USD") return "DOLAR";
+  if (payment.currency === "NIO") return "EFECTIVO";
+  return payment.method || "PAGO";
+}
+
+function getDescription(payment: any) {
+  const grade = payment.students?.grades?.name ?? "";
+  const section = payment.students?.sections?.name ?? "";
+
+  if (payment.concept === "MENSUALIDAD") {
+    const monthName = payment.month ? MONTHS[payment.month - 1] : "";
+    return `Mensualidad ${monthName} • ${grade} ${section}`.trim();
+  }
+
+  if (payment.concept === "MATRICULA") {
+    return `Matrícula • ${grade} ${section}`.trim();
+  }
+
+  return `${capitalize(payment.concept)} • ${grade} ${section}`.trim();
+}
 
 export function RecentPayments() {
   const { data = [] } = useQuery({
@@ -40,6 +59,7 @@ export function RecentPayments() {
           currency,
           concept,
           method,
+          month,
           paid_at,
           students (
             full_name,
@@ -86,11 +106,14 @@ export function RecentPayments() {
               .slice(0, 2)
               .join("");
 
-            const grade =
-              payment.students?.grades?.name ?? "";
+            const methodLabel = getMethodLabel(payment);
 
-            const section =
-              payment.students?.sections?.name ?? "";
+            const methodClass =
+              methodLabel === "EFECTIVO"
+                ? "bg-success/10 text-success border-success/20"
+                : methodLabel === "DOLAR"
+                ? "bg-info/10 text-info border-info/20"
+                : "bg-muted text-muted-foreground";
 
             return (
               <div
@@ -108,7 +131,7 @@ export function RecentPayments() {
                       {payment.students?.full_name}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                    {capitalize(payment.concept)} • {grade} {section}
+                      {getDescription(payment)}
                     </p>
                   </div>
                 </div>
@@ -121,17 +144,12 @@ export function RecentPayments() {
                   <div className="flex items-center gap-2 mt-1">
                     <Badge
                       variant="outline"
-                      className={cn(
-                        "text-[10px] px-1.5 py-0",
-                        methodColors[payment.method] ??
-                          "bg-muted text-muted-foreground"
-                      )}
+                      className={cn("text-[10px] px-1.5 py-0", methodClass)}
                     >
-                      {payment.method}
+                      {methodLabel}
                     </Badge>
                     <span className="text-[10px] text-muted-foreground">
                       {formatNicaraguaTime(payment.paid_at)}
-
                     </span>
                   </div>
                 </div>

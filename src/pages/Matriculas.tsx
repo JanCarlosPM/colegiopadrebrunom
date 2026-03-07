@@ -21,6 +21,7 @@ import {
 import { Plus, User } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { imprimirReciboMatricula } from "@/utils/imprimirReciboMatricula";
 
 /* ================= RECIBO ================= */
 
@@ -452,15 +453,18 @@ export default function Matriculas() {
                   setOpenAdd(false);
 
                   setTimeout(() => {
-                    imprimirRecibo({
-                      estudiante: selectedStudent.full_name,
-                      total,
-                      pagado: paid,
-                      cambio,
-                      moneda: currency === "USD" ? "$" : "C$",
-                      fecha: new Date().toLocaleString("es-NI", {
+                    imprimirReciboMatricula({
+                      numero: String(Date.now()).slice(-5),
+                      fecha: new Date().toLocaleDateString("es-NI", {
                         timeZone: "America/Managua",
                       }),
+                      estudiante: selectedStudent.full_name,
+                      grado: selectedStudent.grades?.name ?? "",
+                      anio: String(year),
+                      nivel: selectedStudent.sections?.name ?? "",
+                      montoCordobas: currency === "NIO" ? Number(paid).toFixed(2) : "",
+                      montoDolares: currency === "USD" ? Number(paid).toFixed(2) : "",
+                      concepto: "Pago de matrícula",
                     });
                   }, 300);
 
@@ -497,44 +501,44 @@ export default function Matriculas() {
           </Button>
         </DialogContent>
       </Dialog>
-    
-    {/* FILTRO AÑO + BUSCADOR */}
-<div className="flex flex-col md:flex-row md:items-end gap-4 mb-4">
 
-  {/* Año */}
-  <div className="w-full md:w-40">
-    <label className="text-sm font-medium block mb-1">
-      Año
-    </label>
-    <select
-      className="w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-      value={year}
-      onChange={(e) => setYear(Number(e.target.value))}
-    >
-      {Array.from({ length: 5 }).map((_, i) => {
-        const y = currentYear - i;
-        return (
-          <option key={y} value={y}>
-            {y}
-          </option>
-        );
-      })}
-    </select>
-  </div>
+      {/* FILTRO AÑO + BUSCADOR */}
+      <div className="flex flex-col md:flex-row md:items-end gap-4 mb-4">
 
-  {/* Buscador */}
-  <div className="flex-1">
-    <label className="text-sm font-medium block mb-1">
-      Buscar
-    </label>
-    <Input
-      placeholder="Estudiante, grado, sección, monto, estado o fecha..."
-      value={tableSearch}
-      onChange={(e) => setTableSearch(e.target.value)}
-    />
-  </div>
+        {/* Año */}
+        <div className="w-full md:w-40">
+          <label className="text-sm font-medium block mb-1">
+            Año
+          </label>
+          <select
+            className="w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            value={year}
+            onChange={(e) => setYear(Number(e.target.value))}
+          >
+            {Array.from({ length: 5 }).map((_, i) => {
+              const y = currentYear - i;
+              return (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              );
+            })}
+          </select>
+        </div>
 
-</div>
+        {/* Buscador */}
+        <div className="flex-1">
+          <label className="text-sm font-medium block mb-1">
+            Buscar
+          </label>
+          <Input
+            placeholder="Estudiante, grado, sección, monto, estado o fecha..."
+            value={tableSearch}
+            onChange={(e) => setTableSearch(e.target.value)}
+          />
+        </div>
+
+      </div>
 
 
       <Table>
@@ -601,15 +605,18 @@ export default function Matriculas() {
                   variant="outline"
                   size="icon"
                   onClick={() =>
-                    imprimirRecibo({
-                      estudiante: e.students?.full_name,
-                      total: e.total_amount,
-                      pagado: e.paid_amount,
-                      cambio: Math.max(e.paid_amount - e.total_amount, 0),
-                      moneda: e.currency === "USD" ? "$" : "C$",
-                      fecha: new Date(e.enrolled_at).toLocaleString("es-NI", {
+                    imprimirReciboMatricula({
+                      numero: String(e.id).slice(-5),
+                      fecha: new Date(e.enrolled_at).toLocaleDateString("es-NI", {
                         timeZone: "America/Managua",
                       }),
+                      estudiante: e.students?.full_name ?? "",
+                      grado: e.students?.grades?.name ?? "",
+                      anio: String(year),
+                      nivel: e.students?.sections?.name ?? "",
+                      montoCordobas: e.currency === "NIO" ? Number(e.paid_amount).toFixed(2) : "",
+                      montoDolares: e.currency === "USD" ? Number(e.paid_amount).toFixed(2) : "",
+                      concepto: "Pago de matrícula",
                     })
                   }
                 >

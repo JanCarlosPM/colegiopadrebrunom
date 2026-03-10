@@ -23,51 +23,17 @@ import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { imprimirReciboMatricula } from "@/utils/imprimirReciboMatricula";
 
-/* ================= RECIBO ================= */
-
-function imprimirRecibo(data: any) {
-  const win = window.open("", "", "width=800,height=600");
-  if (!win) return;
-
-  win.document.write(`
-    <html>
-      <head>
-        <title>Recibo Matrícula</title>
-        <style>
-          body { font-family: Arial; font-size: 12px; padding: 20px; }
-          h2 { text-align: center; }
-          hr { margin: 10px 0; }
-        </style>
-      </head>
-      <body onload="window.print(); window.close();">
-        <h2>Colegio Padre Bruno Martínez</h2>
-        <p><strong>Fecha y Hora:</strong> ${data.fecha}</p>
-        <p><strong>Estudiante:</strong> ${data.estudiante}</p>
-        <hr />
-        <p><strong>Concepto:</strong> Matrícula</p>
-        <p><strong>Total:</strong> ${data.moneda} ${data.total}</p>
-        <p><strong>Recibido:</strong> ${data.moneda} ${data.pagado}</p>
-        <p><strong>Cambio:</strong> ${data.moneda} ${data.cambio}</p>
-        <hr />
-        <br /><br />
-        ___________________________<br/>Firma
-      </body>
-    </html>
-  `);
-
-  win.document.close();
-}
-
 /* ================= FETCH ================= */
 
 const fetchData = async (year: number) => {
-  const { data: enrollments } = await supabase
+  const { data: enrollments, error: enrollmentsError } = await supabase
     .from("enrollments")
     .select(`
       id,
       student_id,
       total_amount,
       paid_amount,
+      change_amount,
       currency,
       status,
       enrolled_at,
@@ -80,7 +46,9 @@ const fetchData = async (year: number) => {
     .eq("academic_year", year)
     .order("enrolled_at", { ascending: false });
 
-  const { data: students } = await supabase
+  if (enrollmentsError) throw enrollmentsError;
+
+  const { data: students, error: studentsError } = await supabase
     .from("students")
     .select(`
       id,
@@ -91,11 +59,37 @@ const fetchData = async (year: number) => {
     `)
     .order("full_name");
 
-  return { enrollments: enrollments ?? [], students: students ?? [] };
-};
+  if (studentsError) throw studentsError;
 
-const getEnrollmentByStudent = (studentId: string) => {
-  return enrollments.find((e: any) => e.student_id === studentId);
+  const { data: payments, error: paymentsError } = await supabase
+    .from("payments")
+    .select(`
+      id,
+      student_id,
+      amount,
+      received_amount,
+      change_amount,
+      currency,
+      concept,
+      description,
+      paid_at,
+      students (
+        full_name,
+        grades ( name ),
+        sections ( name )
+      )
+    `)
+    .eq("concept", "MATRICULA")
+    .eq("academic_year", year)
+    .order("paid_at", { ascending: false });
+
+  if (paymentsError) throw paymentsError;
+
+  return {
+    enrollments: enrollments ?? [],
+    students: students ?? [],
+    payments: payments ?? [],
+  };
 };
 
 /* ================= COMPONENT ================= */
@@ -105,20 +99,17 @@ export default function Matriculas() {
 
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(currentYear);
+
   const { data } = useQuery({
     queryKey: ["matriculas", year],
     queryFn: () => fetchData(year),
   });
+
   const [saldoPendiente, setSaldoPendiente] = useState(0);
 
   const enrollments = data?.enrollments ?? [];
   const students = data?.students ?? [];
-
-  const getEnrollmentByStudent = (studentId: string) => {
-    return enrollments.find((e: any) => e.student_id === studentId);
-  };
-
-
+  const payments = data?.payments ?? [];
 
   /* ================= STATE ================= */
 
@@ -136,9 +127,6 @@ export default function Matriculas() {
 
   const cambio = Math.max(paid - saldoPendiente, 0);
 
-  const estado =
-    paid === 0 ? "PENDIENTE" : paid < total ? "PARCIAL" : "PAGADO";
-
   const filteredStudents = useMemo(() => {
     if (!search) return [];
     return students.filter((s: any) =>
@@ -147,13 +135,14 @@ export default function Matriculas() {
         .includes(search.toLowerCase())
     );
   }, [students, search]);
-  const filteredEnrollments = useMemo(() => {
-    if (!tableSearch) return enrollments;
 
-    return enrollments.filter((e: any) => {
+  const filteredPayments = useMemo(() => {
+    if (!tableSearch) return payments;
+
+    return payments.filter((p: any) => {
       const searchValue = tableSearch.toLowerCase();
 
-      const fecha = new Date(e.enrolled_at).toLocaleString("es-NI", {
+      const fecha = new Date(p.paid_at).toLocaleString("es-NI", {
         timeZone: "America/Managua",
         day: "2-digit",
         month: "2-digit",
@@ -163,16 +152,18 @@ export default function Matriculas() {
       }).toLowerCase();
 
       return (
-        e.students?.full_name?.toLowerCase().includes(searchValue) ||
-        e.students?.grades?.name?.toLowerCase().includes(searchValue) ||
-        e.students?.sections?.name?.toLowerCase().includes(searchValue) ||
-        String(e.total_amount).includes(searchValue) ||
-        String(e.paid_amount).includes(searchValue) ||
-        e.status?.toLowerCase().includes(searchValue) ||
+        p.students?.full_name?.toLowerCase().includes(searchValue) ||
+        p.students?.grades?.name?.toLowerCase().includes(searchValue) ||
+        p.students?.sections?.name?.toLowerCase().includes(searchValue) ||
+        String(p.amount).includes(searchValue) ||
+        String(p.received_amount).includes(searchValue) ||
+        String(p.change_amount).includes(searchValue) ||
+        String(p.currency).toLowerCase().includes(searchValue) ||
+        String(p.description ?? "").toLowerCase().includes(searchValue) ||
         fecha.includes(searchValue)
       );
     });
-  }, [enrollments, tableSearch]);
+  }, [payments, tableSearch]);
 
   /* ================= MUTATION ================= */
 
@@ -182,34 +173,40 @@ export default function Matriculas() {
 
       const now = new Date().toISOString();
 
-      const { data: existing } = await supabase
+      const { data: existing, error: existingError } = await supabase
         .from("enrollments")
         .select("*")
         .eq("student_id", selectedStudent.id)
         .eq("academic_year", year)
         .maybeSingle();
 
+      if (existingError) throw existingError;
+
       let montoAplicado = 0;
+      let cambioPago = 0;
+      let statusPago = "PENDIENTE";
 
       if (!existing) {
-        // PRIMER PAGO
-        montoAplicado = Math.min(paid, total);
+        const totalOriginal = Number(total);
+        montoAplicado = Math.min(paid, totalOriginal);
+        cambioPago = Math.max(paid - montoAplicado, 0);
 
-        const status =
-          montoAplicado < total
-            ? "PARCIAL"
-            : "PAGADO";
+        statusPago = montoAplicado < totalOriginal ? "PARCIAL" : "PAGADO";
 
-        await supabase.from("enrollments").insert({
-          student_id: selectedStudent.id,
-          academic_year: year,
-          total_amount: total,
-          paid_amount: montoAplicado,
-          currency,
-          status,
-          enrolled_at: now,
-        });
+        const { error: insertEnrollmentError } = await supabase
+          .from("enrollments")
+          .insert({
+            student_id: selectedStudent.id,
+            academic_year: year,
+            total_amount: totalOriginal,
+            paid_amount: montoAplicado,
+            change_amount: cambioPago,
+            currency,
+            status: statusPago,
+            enrolled_at: now,
+          });
 
+        if (insertEnrollmentError) throw insertEnrollmentError;
       } else {
         const totalOriginal = Number(existing.total_amount);
         const alreadyPaid = Number(existing.paid_amount);
@@ -220,49 +217,90 @@ export default function Matriculas() {
         }
 
         montoAplicado = Math.min(paid, restante);
+        cambioPago = Math.max(paid - montoAplicado, 0);
 
         if (montoAplicado <= 0) {
           throw new Error("YA_PAGADO");
         }
 
         const newPaid = alreadyPaid + montoAplicado;
+        statusPago = newPaid < totalOriginal ? "PARCIAL" : "PAGADO";
 
-        const status =
-          newPaid < totalOriginal
-            ? "PARCIAL"
-            : "PAGADO";
-
-        await supabase
+        const { error: updateEnrollmentError } = await supabase
           .from("enrollments")
           .update({
             paid_amount: newPaid,
-            status,
+            change_amount: cambioPago,
+            status: statusPago,
           })
           .eq("id", existing.id);
+
+        if (updateEnrollmentError) throw updateEnrollmentError;
       }
 
-      // Registrar pago REAL aplicado
-      await supabase.from("payments").insert({
+      const { error: paymentError } = await supabase.from("payments").insert({
         student_id: selectedStudent.id,
         concept: "MATRICULA",
         amount: montoAplicado,
+        received_amount: paid,
+        change_amount: cambioPago,
         currency,
         academic_year: year,
         paid_at: now,
+        description: statusPago,
+        method: currency === "USD" ? "DOLAR" : "EFECTIVO",
       });
-    }
-    ,
 
-    onSuccess: async () => {
+      if (paymentError) throw paymentError;
+
+      return {
+        paidAt: now,
+        montoAplicado,
+        cambioPago,
+        statusPago,
+      };
+    },
+
+    onSuccess: async (result) => {
       await qc.invalidateQueries({ queryKey: ["matriculas", year] });
 
       setOpenAdd(false);
+
+      setTimeout(() => {
+        imprimirReciboMatricula({
+          numero: String(Date.now()).slice(-5),
+          fecha: new Date(result.paidAt).toLocaleDateString("es-NI", {
+            timeZone: "America/Managua",
+          }),
+          estudiante: selectedStudent.full_name,
+          grado: selectedStudent.grades?.name ?? "",
+          anio: String(year),
+          nivel: selectedStudent.sections?.name ?? "",
+          montoCordobas:
+            currency === "NIO" ? Number(paid).toFixed(2) : "",
+          montoDolares:
+            currency === "USD" ? Number(paid).toFixed(2) : "",
+          concepto: "Pago de matrícula",
+        });
+      }, 300);
+
       setPaid(0);
       setSearch("");
       setSelectedStudent(null);
+      setSaldoPendiente(0);
+      setTotal(300);
+      setCurrency("NIO");
+    },
+
+    onError: (err: any) => {
+      if (err.message === "YA_PAGADO") {
+        setInfoMsg("Esta matrícula ya está completamente pagada.");
+      } else {
+        setInfoMsg("Error al registrar matrícula.");
+      }
+      setOpenInfo(true);
     },
   });
-
 
   /* ================= UI ================= */
 
@@ -282,7 +320,7 @@ export default function Matriculas() {
               <DialogTitle>Pago de Matrícula</DialogTitle>
             </DialogHeader>
 
-            {/* ================= ESTUDIANTE ================= */}
+            {/* ESTUDIANTE */}
             <label className="text-sm font-medium">Estudiante</label>
             <Input
               placeholder="Buscar estudiante..."
@@ -311,7 +349,6 @@ export default function Matriculas() {
 
                         setTotal(totalOriginal);
                         setSaldoPendiente(Math.max(restante, 0));
-
                         setCurrency(existing.currency);
                       } else {
                         const base = currency === "USD" ? 8 : 300;
@@ -323,16 +360,13 @@ export default function Matriculas() {
                       setSelectedStudent(s);
                       setSearch(s.full_name);
                     }}
-
-
-
-
                   >
                     <User className="h-4 w-4 mt-1" />
                     <div>
                       <p className="font-medium">{s.full_name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {s.grades?.name} {s.sections?.name ? `- ${s.sections?.name}` : ""}
+                        {s.grades?.name}{" "}
+                        {s.sections?.name ? `- ${s.sections?.name}` : ""}
                       </p>
                     </div>
                   </div>
@@ -346,16 +380,11 @@ export default function Matriculas() {
               </p>
             )}
 
-            {/* ================= TOTAL + MONEDA ================= */}
+            {/* TOTAL + MONEDA */}
             <div className="grid grid-cols-2 gap-4 mt-4">
               <div>
                 <label className="text-sm font-medium">Total matrícula</label>
-                <Input
-                  type="number"
-                  value={saldoPendiente}
-                  disabled
-                />
-
+                <Input type="number" value={saldoPendiente} disabled />
               </div>
 
               <div>
@@ -374,14 +403,12 @@ export default function Matriculas() {
 
                       if (enrollment) {
                         const restante =
-                          Number(enrollment.total_amount) - Number(enrollment.paid_amount);
+                          Number(enrollment.total_amount) -
+                          Number(enrollment.paid_amount);
 
                         const tasa = 36;
-
                         const convertido =
-                          v === "USD"
-                            ? restante / tasa
-                            : restante * tasa;
+                          v === "USD" ? restante / tasa : restante * tasa;
 
                         setSaldoPendiente(Math.max(convertido, 0));
                       }
@@ -396,7 +423,7 @@ export default function Matriculas() {
               </div>
             </div>
 
-            {/* ================= RECIBIDO + CAMBIO ================= */}
+            {/* RECIBIDO + CAMBIO */}
             <div className="grid grid-cols-2 gap-4 mt-4">
               <div>
                 <label className="text-sm font-medium">Recibido</label>
@@ -406,7 +433,6 @@ export default function Matriculas() {
                   maxLength={currency === "USD" ? 3 : 4}
                   onChange={(e) => {
                     const value = e.target.value.replace(/[^0-9]/g, "");
-
                     const limited =
                       currency === "USD"
                         ? value.slice(0, 3)
@@ -429,64 +455,21 @@ export default function Matriculas() {
                   value={
                     cambio > 0
                       ? `${currency === "USD" ? "$" : "C$"} ${cambio}`
-                      : ""
+                      : `${currency === "USD" ? "$" : "C$"} 0`
                   }
                 />
               </div>
             </div>
 
-            {/* ================= BOTÓN ================= */}
+            {/* BOTÓN */}
             <Button
               className="w-full mt-6"
-              disabled={
-                !selectedStudent ||
-                paid <= 0 ||
-                saldoPendiente === 0
-              }
-
-              onClick={async () => {
-                try {
-                  await createEnrollment.mutateAsync();
-
-                  await qc.invalidateQueries({ queryKey: ["matriculas", year] });
-
-                  setOpenAdd(false);
-
-                  setTimeout(() => {
-                    imprimirReciboMatricula({
-                      numero: String(Date.now()).slice(-5),
-                      fecha: new Date().toLocaleDateString("es-NI", {
-                        timeZone: "America/Managua",
-                      }),
-                      estudiante: selectedStudent.full_name,
-                      grado: selectedStudent.grades?.name ?? "",
-                      anio: String(year),
-                      nivel: selectedStudent.sections?.name ?? "",
-                      montoCordobas: currency === "NIO" ? Number(paid).toFixed(2) : "",
-                      montoDolares: currency === "USD" ? Number(paid).toFixed(2) : "",
-                      concepto: "Pago de matrícula",
-                    });
-                  }, 300);
-
-                } catch (err: any) {
-
-                  if (err.message === "YA_PAGADO") {
-                    setInfoMsg("Esta matrícula ya está completamente pagada.");
-                  } else if (err.message === "EXCEDE_RESTANTE") {
-                    setInfoMsg("El monto excede el saldo pendiente.");
-                  } else {
-                    setInfoMsg("Error al registrar matrícula");
-                  }
-
-                  setOpenInfo(true);
-                }
-              }}
-
+              disabled={!selectedStudent || paid <= 0 || saldoPendiente === 0}
+              onClick={() => createEnrollment.mutate()}
             >
-              Registrar Pago
+              {createEnrollment.isPending ? "Registrando..." : "Registrar Pago"}
             </Button>
           </DialogContent>
-
         </Dialog>
       </div>
 
@@ -504,12 +487,8 @@ export default function Matriculas() {
 
       {/* FILTRO AÑO + BUSCADOR */}
       <div className="flex flex-col md:flex-row md:items-end gap-4 mb-4">
-
-        {/* Año */}
         <div className="w-full md:w-40">
-          <label className="text-sm font-medium block mb-1">
-            Año
-          </label>
+          <label className="text-sm font-medium block mb-1">Año</label>
           <select
             className="w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
             value={year}
@@ -526,29 +505,27 @@ export default function Matriculas() {
           </select>
         </div>
 
-        {/* Buscador */}
         <div className="flex-1">
-          <label className="text-sm font-medium block mb-1">
-            Buscar
-          </label>
+          <label className="text-sm font-medium block mb-1">Buscar</label>
           <Input
-            placeholder="Estudiante, grado, sección, monto, estado o fecha..."
+            placeholder="Estudiante, grado, sección, recibido, cambio, estado o fecha..."
             value={tableSearch}
             onChange={(e) => setTableSearch(e.target.value)}
           />
         </div>
-
       </div>
 
-
+      {/* TABLA DE PAGOS DE MATRÍCULA */}
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Estudiante</TableHead>
             <TableHead>Grado</TableHead>
             <TableHead>Sección</TableHead>
-            <TableHead>Monto Total</TableHead>
-            <TableHead>Pagado</TableHead>
+            <TableHead>Monto Aplicado</TableHead>
+            <TableHead>Recibido</TableHead>
+            <TableHead>Cambio</TableHead>
+            <TableHead>Moneda</TableHead>
             <TableHead>Estado</TableHead>
             <TableHead>Fecha y Hora</TableHead>
             <TableHead className="text-center">Acción</TableHead>
@@ -556,41 +533,44 @@ export default function Matriculas() {
         </TableHeader>
 
         <TableBody>
-          {filteredEnrollments.map((e: any) => (
-            <TableRow key={e.id}>
-              <TableCell>{e.students?.full_name}</TableCell>
+          {filteredPayments.map((p: any) => (
+            <TableRow key={p.id}>
+              <TableCell>{p.students?.full_name}</TableCell>
+
+              <TableCell>{p.students?.grades?.name ?? "-"}</TableCell>
+
+              <TableCell>{p.students?.sections?.name ?? "-"}</TableCell>
 
               <TableCell>
-                {e.students?.grades?.name ?? "-"}
+                {p.currency === "USD" ? "$" : "C$"} {Number(p.amount).toFixed(2)}
               </TableCell>
 
               <TableCell>
-                {e.students?.sections?.name ?? "-"}
+                {p.currency === "USD" ? "$" : "C$"} {Number(p.received_amount || 0).toFixed(2)}
               </TableCell>
 
               <TableCell>
-                {e.currency === "USD" ? "$" : "C$"} {e.total_amount}
+                {p.currency === "USD" ? "$" : "C$"} {Number(p.change_amount || 0).toFixed(2)}
               </TableCell>
 
-              <TableCell>
-                {e.currency === "USD" ? "$" : "C$"} {e.paid_amount}
-              </TableCell>
+              <TableCell>{p.currency === "USD" ? "Dólares" : "Córdobas"}</TableCell>
 
               <TableCell>
                 <span
-                  className={`px-2 py-1 rounded text-xs ${e.status === "PAGADO"
-                    ? "bg-green-100 text-green-700"
-                    : e.status === "PARCIAL"
+                  className={`px-2 py-1 rounded text-xs ${
+                    p.description === "PAGADO"
+                      ? "bg-green-100 text-green-700"
+                      : p.description === "PARCIAL"
                       ? "bg-yellow-100 text-yellow-700"
                       : "bg-red-100 text-red-700"
-                    }`}
+                  }`}
                 >
-                  {e.status}
+                  {p.description ?? "—"}
                 </span>
               </TableCell>
 
               <TableCell>
-                {new Date(e.enrolled_at).toLocaleString("es-NI", {
+                {new Date(p.paid_at).toLocaleString("es-NI", {
                   timeZone: "America/Managua",
                   day: "2-digit",
                   month: "2-digit",
@@ -606,16 +586,22 @@ export default function Matriculas() {
                   size="icon"
                   onClick={() =>
                     imprimirReciboMatricula({
-                      numero: String(e.id).slice(-5),
-                      fecha: new Date(e.enrolled_at).toLocaleDateString("es-NI", {
+                      numero: String(p.id).slice(-5),
+                      fecha: new Date(p.paid_at).toLocaleDateString("es-NI", {
                         timeZone: "America/Managua",
                       }),
-                      estudiante: e.students?.full_name ?? "",
-                      grado: e.students?.grades?.name ?? "",
+                      estudiante: p.students?.full_name ?? "",
+                      grado: p.students?.grades?.name ?? "",
                       anio: String(year),
-                      nivel: e.students?.sections?.name ?? "",
-                      montoCordobas: e.currency === "NIO" ? Number(e.paid_amount).toFixed(2) : "",
-                      montoDolares: e.currency === "USD" ? Number(e.paid_amount).toFixed(2) : "",
+                      nivel: p.students?.sections?.name ?? "",
+                      montoCordobas:
+                        p.currency === "NIO"
+                          ? Number(p.received_amount || 0).toFixed(2)
+                          : "",
+                      montoDolares:
+                        p.currency === "USD"
+                          ? Number(p.received_amount || 0).toFixed(2)
+                          : "",
                       concepto: "Pago de matrícula",
                     })
                   }
@@ -627,7 +613,6 @@ export default function Matriculas() {
           ))}
         </TableBody>
       </Table>
-
     </DashboardLayout>
   );
 }

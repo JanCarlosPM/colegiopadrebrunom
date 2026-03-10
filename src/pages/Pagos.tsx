@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,20 +12,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Printer } from "lucide-react";
+import { Plus, Printer, Search } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
@@ -53,6 +46,7 @@ function imprimirRecibo(data: any) {
         <p><strong>Concepto:</strong> Mensualidad</p>
         <p><strong>Mes:</strong> ${data.mes}</p>
         <p><strong>Total:</strong> ${data.moneda} ${data.total}</p>
+        <p><strong>Aplicado:</strong> ${data.moneda} ${data.aplicado}</p>
         <p><strong>Recibido:</strong> ${data.moneda} ${data.recibido}</p>
         <p><strong>Cambio:</strong> ${data.moneda} ${data.cambio}</p>
         <hr />
@@ -63,11 +57,16 @@ function imprimirRecibo(data: any) {
 
   win.document.close();
 }
+
 const MONTHS = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ];
+
+const RATE_USD_TO_NIO = 36.5;
+
 /* ================= FETCHERS ================= */
+
 const fetchCurrentAcademicYear = async () => {
   const { data, error } = await supabase
     .from("school_settings")
@@ -80,43 +79,55 @@ const fetchCurrentAcademicYear = async () => {
   return data?.current_academic_year ?? new Date().getFullYear();
 };
 
-const fetchPayments = async () => {
+const fetchPayments = async (year: number) => {
   const { data, error } = await supabase
     .from("payments")
     .select(`
       id,
+      student_id,
+      charge_id,
       amount,
+      received_amount,
+      change_amount,
       currency,
       paid_at,
       concept,
       month,
+      description,
+      method,
+      academic_year,
       students (
         full_name,
         grades ( name ),
         sections ( name )
       )
     `)
-    .eq("concept", "MENSUALIDAD") // ✅ CORREGIDO
+    .eq("concept", "MENSUALIDAD")
+    .eq("academic_year", year)
     .order("paid_at", { ascending: false });
 
   if (error) throw error;
   return data ?? [];
 };
+
 const fetchStudents = async () => {
   const { data, error } = await supabase
     .from("students")
     .select(`
       id,
       full_name,
+      status,
       grades ( name ),
       sections ( name )
     `)
+    .eq("status", "ACTIVO")
     .order("full_name");
 
   if (error) throw error;
   return data ?? [];
 };
-const fetchPendingCharges = async (currentYear: number) => {
+
+const fetchStudentOpenCharges = async (studentId: string, year: number) => {
   const { data, error } = await supabase
     .from("charges")
     .select(`
@@ -124,267 +135,225 @@ const fetchPendingCharges = async (currentYear: number) => {
       student_id,
       month,
       amount,
+      paid_amount,
       currency,
       academic_year,
       concept,
       status
     `)
-    .eq("academic_year", currentYear)
+    .eq("student_id", studentId)
+    .eq("academic_year", year)
     .eq("concept", "MENSUALIDAD")
-    .eq("status", "PENDIENTE")
-    .order("month");
+    .in("status", ["PENDIENTE", "PARCIAL"])
+    .order("month", { ascending: true });
 
   if (error) throw error;
   return data ?? [];
 };
+
 /* ================= COMPONENT ================= */
 
 export default function Pagos() {
-
   const qc = useQueryClient();
 
-  const { data: academicYear } = useQuery({
+  const { data: defaultAcademicYear } = useQuery({
     queryKey: ["academic-year"],
     queryFn: fetchCurrentAcademicYear,
   });
+
+  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(currentYear);
+
   const [search, setSearch] = useState("");
   const [tableSearch, setTableSearch] = useState("");
   const [open, setOpen] = useState(false);
-  const [studentPendingCharges, setStudentPendingCharges] = useState<any[]>([]);
-  const now = new Date();
-  const currentMonth = now.getMonth() + 1;
+  const [studentCharges, setStudentCharges] = useState<any[]>([]);
 
-  const loadStudentPendingCharges = async (studentId: string) => {
-    if (!academicYear) return;
-
-    const { data: chargesData, error: chargesError } = await supabase
-      .from("charges")
-      .select(`
-      id,
-      student_id,
-      month,
-      amount,
-      currency,
-      academic_year,
-      concept,
-      status
-    `)
-      .eq("student_id", studentId)
-      .eq("academic_year", academicYear)
-      .eq("concept", "MENSUALIDAD")
-      .order("month");
-
-    const { data: paymentsData, error: paymentsError } = await supabase
-      .from("payments")
-      .select(`
-      id,
-      month,
-      charge_id,
-      concept,
-      academic_year,
-      status
-    `)
-      .eq("student_id", studentId)
-      .eq("academic_year", academicYear)
-      .eq("concept", "MENSUALIDAD");
-
-    if (chargesError) {
-      console.error("Error cargando charges del estudiante:", chargesError);
-      setStudentPendingCharges([]);
-      return;
-    }
-
-    if (paymentsError) {
-      console.error("Error cargando payments del estudiante:", paymentsError);
-      setStudentPendingCharges([]);
-      return;
-    }
-
-    const paidMonths = new Set(
-      (paymentsData || [])
-        .filter((p: any) => p.month != null)
-        .map((p: any) => Number(p.month))
-    );
-
-    const pendientes = (chargesData || [])
-      .filter((c: any) =>
-        c.status === "PENDIENTE" &&
-        c.month != null &&
-        !paidMonths.has(Number(c.month))
-      )
-      .sort((a: any, b: any) => a.month - b.month)
-      .filter(
-        (c: any, index: number, arr: any[]) =>
-          index === arr.findIndex((x: any) => x.month === c.month)
-      );
-
-    setStudentPendingCharges(pendientes);
-  };
-
-  const {
-    data: payments = [],
-    error: paymentsError,
-    isError: paymentsIsError,
-  } = useQuery({
-    queryKey: ["payments"],
-    queryFn: fetchPayments,
+  const { data: payments = [] } = useQuery({
+    queryKey: ["payments", year],
+    queryFn: () => fetchPayments(year),
+    enabled: !!year,
   });
 
-  useEffect(() => {
-    if (paymentsIsError) {
-      console.error("ERROR payments:", paymentsError);
-    }
-  }, [paymentsIsError, paymentsError]);
   const { data: students = [] } = useQuery({
-    queryKey: ["students"],
+    queryKey: ["students-active"],
     queryFn: fetchStudents,
   });
-
-  const {
-    data: charges = [],
-    error: chargesError,
-    isError: chargesIsError,
-    isLoading: chargesLoading,
-  } = useQuery({
-    queryKey: ["charges-pending", academicYear],
-    enabled: !!academicYear,
-    queryFn: () => fetchPendingCharges(academicYear!),
-  });
-
-  useEffect(() => {
-    if (chargesIsError) console.error("ERROR charges:", chargesError);
-    console.log("academicYear:", academicYear, "charges:", charges.length, charges.slice(0, 3));
-  }, [chargesIsError, chargesError, charges, academicYear]);
-
-
 
   const [form, setForm] = useState<any>({
     student_id: "",
     charge_id: "",
     recibido: "",
-    pay_currency: "USD", // o "NIO"
+    pay_currency: "USD",
   });
 
-  const selectedCharge = studentPendingCharges.find(
+  const selectedCharge = studentCharges.find(
     (c: any) => c.id === form.charge_id
   );
 
-  const RATE_USD_TO_NIO = 36.5;
+  const totalOriginal = Number(selectedCharge?.amount ?? 0);
+  const paidSoFar = Number(selectedCharge?.paid_amount ?? 0);
+  const remainingInChargeCurrency = Math.max(totalOriginal - paidSoFar, 0);
 
-  const total = Number(selectedCharge?.amount ?? 0);
   const chargeCurrency = selectedCharge?.currency ?? "USD";
   const payCurrency = form.pay_currency ?? "USD";
-
   const recibidoNum = Number(form.recibido || 0);
 
-  const totalInPayCurrency =
+  const remainingInPayCurrency =
     chargeCurrency === payCurrency
-      ? total
+      ? remainingInChargeCurrency
       : chargeCurrency === "USD" && payCurrency === "NIO"
-        ? total * RATE_USD_TO_NIO
-        : total / RATE_USD_TO_NIO;
+        ? remainingInChargeCurrency * RATE_USD_TO_NIO
+        : remainingInChargeCurrency / RATE_USD_TO_NIO;
+
+  const amountAppliedInPayCurrency = Math.min(
+    recibidoNum,
+    Number(remainingInPayCurrency.toFixed(2))
+  );
+
+  const amountAppliedInChargeCurrency =
+    chargeCurrency === payCurrency
+      ? amountAppliedInPayCurrency
+      : chargeCurrency === "USD" && payCurrency === "NIO"
+        ? amountAppliedInPayCurrency / RATE_USD_TO_NIO
+        : amountAppliedInPayCurrency * RATE_USD_TO_NIO;
 
   const cambio =
-    recibidoNum > totalInPayCurrency
-      ? recibidoNum - totalInPayCurrency
+    recibidoNum > amountAppliedInPayCurrency
+      ? recibidoNum - amountAppliedInPayCurrency
       : 0;
 
   const simboloPago = payCurrency === "USD" ? "$" : "C$";
+  const simboloCargo = chargeCurrency === "USD" ? "$" : "C$";
+  const loadStudentOpenCharges = async (studentId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("charges")
+        .select(`
+        id,
+        student_id,
+        month,
+        amount,
+        paid_amount,
+        currency,
+        academic_year,
+        concept,
+        status
+      `)
+        .eq("student_id", studentId)
+        .eq("academic_year", year)
+        .eq("concept", "MENSUALIDAD")
+        .order("month", { ascending: true })
+        .order("created_at", { ascending: false });
 
-  useEffect(() => {
-    if (!academicYear) return;
+      if (error) throw error;
 
-    const generarMensualidades = async () => {
-      const { data: enrollments, error } = await supabase
-        .from("enrollments")
-        .select("student_id")
-        .eq("academic_year", academicYear);
+      const byMonth = new Map<number, any>();
 
-      if (error || !enrollments) return;
+      for (const charge of data ?? []) {
+        if (!charge.month) continue;
 
-      for (const e of enrollments) {
-        for (let mes = 1; mes <= currentMonth; mes++) {
-          const { data: existing } = await supabase
-            .from("charges")
-            .select("id")
-            .eq("student_id", e.student_id)
-            .eq("academic_year", academicYear)
-            .eq("concept", "MENSUALIDAD")
-            .eq("month", mes)
-            .maybeSingle();
+        const existing = byMonth.get(charge.month);
 
-          if (!existing) {
-            await supabase.from("charges").insert({
-              student_id: e.student_id,
-              academic_year: academicYear,
-              concept: "MENSUALIDAD",
-              month: mes,
-              amount: 21,          // ✅ monto base
-              currency: "USD",     // ✅ moneda base
-              status: "PENDIENTE",
-            });
-          }
+        // Si ya existe un PAGADO para ese mes, nunca mostrar más ese mes
+        if (existing?.status === "PAGADO") continue;
+
+        // Si este es PAGADO, reemplaza cualquiera
+        if (charge.status === "PAGADO") {
+          byMonth.set(charge.month, charge);
+          continue;
+        }
+
+        // Si no existe aún, guardar el primero
+        if (!existing) {
+          byMonth.set(charge.month, charge);
+          continue;
+        }
+
+        // Si el existente es PENDIENTE y este es PARCIAL, preferir PARCIAL
+        if (existing.status === "PENDIENTE" && charge.status === "PARCIAL") {
+          byMonth.set(charge.month, charge);
         }
       }
 
-      qc.invalidateQueries({ queryKey: ["charges-pending"] });
-      qc.invalidateQueries({ queryKey: ["dashboard"] });
-    };
+      const visibles = Array.from(byMonth.values())
+        .filter((c: any) => c.status === "PENDIENTE" || c.status === "PARCIAL")
+        .sort((a: any, b: any) => a.month - b.month);
 
-    generarMensualidades();
-  }, [academicYear, currentMonth, qc]);
-
-
-  /* ================= CREATE PAYMENT ================= */
+      setStudentCharges(visibles);
+    } catch (error) {
+      console.error("Error cargando mensualidades del estudiante:", error);
+      setStudentCharges([]);
+    }
+  };
 
   const createPayment = useMutation({
     mutationFn: async () => {
-      if (!selectedCharge) throw new Error("No charge");
+      if (!selectedCharge) throw new Error("NO_CHARGE");
 
       const paidAt = new Date().toISOString();
-      const payCurrency = form.pay_currency ?? "USD";
-      const amountToSave = Number(totalInPayCurrency.toFixed(2));
 
-      if (amountToSave <= 0) {
+      if (amountAppliedInPayCurrency <= 0) {
         throw new Error("MONTO_INVALIDO");
       }
+
+      const newPaidAmount =
+        Number(selectedCharge.paid_amount ?? 0) + amountAppliedInChargeCurrency;
+
+      const newStatus =
+        newPaidAmount + 0.0001 >= Number(selectedCharge.amount)
+          ? "PAGADO"
+          : "PARCIAL";
 
       const { error: payErr } = await supabase.from("payments").insert({
         student_id: selectedCharge.student_id,
         charge_id: selectedCharge.id,
         concept: "MENSUALIDAD",
-        academic_year: academicYear,
+        academic_year: year,
         month: selectedCharge.month,
-        amount: amountToSave,
+        amount: Number(amountAppliedInPayCurrency.toFixed(2)),
+        received_amount: Number(recibidoNum.toFixed(2)),
+        change_amount: Number(cambio.toFixed(2)),
         currency: payCurrency,
-        method: "EFECTIVO",
+        method: payCurrency === "USD" ? "DOLAR" : "EFECTIVO",
         paid_at: paidAt,
         status: "COMPLETADO",
+        description: newStatus,
       });
 
       if (payErr) throw payErr;
 
-      const { error: chErr } = await supabase
+      const { error: chargeErr } = await supabase
         .from("charges")
-        .update({ status: "PAGADO" })
+        .update({
+          paid_amount: Number(newPaidAmount.toFixed(2)),
+          status: newStatus,
+        })
         .eq("id", selectedCharge.id);
 
-      if (chErr) throw chErr;
+      if (chargeErr) throw chargeErr;
 
-      return paidAt;
+      return {
+        paidAt,
+        newStatus,
+      };
     },
 
-    onSuccess: async (paidAt) => {
-      await qc.invalidateQueries({ queryKey: ["payments"] });
-      await qc.invalidateQueries({ queryKey: ["charges-pending"] });
+    onSuccess: async ({ paidAt, newStatus }) => {
+      await qc.invalidateQueries({ queryKey: ["payments", year] });
       await qc.invalidateQueries({ queryKey: ["dashboard"] });
+
+      if (selectedCharge?.student_id) {
+        await loadStudentOpenCharges(selectedCharge.student_id);
+      }
 
       setOpen(false);
 
       imprimirRecibo({
         estudiante: search,
-        mes: selectedCharge.month,
-        total: totalInPayCurrency.toFixed(2),
+        mes: MONTHS[(selectedCharge?.month ?? 1) - 1],
+        total: remainingInPayCurrency.toFixed(2),
+        aplicado: amountAppliedInPayCurrency.toFixed(2),
         recibido: recibidoNum.toFixed(2),
         cambio: cambio.toFixed(2),
         moneda: simboloPago,
@@ -393,10 +362,6 @@ export default function Pagos() {
         }),
       });
 
-      if (selectedCharge?.student_id) {
-        await loadStudentPendingCharges(selectedCharge.student_id);
-      }
-
       setForm({
         student_id: "",
         charge_id: "",
@@ -404,14 +369,14 @@ export default function Pagos() {
         pay_currency: "USD",
       });
       setSearch("");
-      setStudentPendingCharges([]);
+      setStudentCharges([]);
     },
 
     onError: (err: any) => {
       console.error("Error registrando pago:", err);
 
       if (err.message === "MONTO_INVALIDO") {
-        alert("La mensualidad tiene monto 0. Revisá los cargos generados.");
+        alert("El monto recibido no es válido.");
         return;
       }
 
@@ -419,30 +384,63 @@ export default function Pagos() {
     },
   });
 
+  const filtered = payments.filter((p: any) => {
+    const text = `${p.students?.full_name ?? ""} ${p.students?.grades?.name ?? ""} ${p.students?.sections?.name ?? ""} ${p.description ?? ""} ${p.method ?? ""} ${MONTHS[(p.month ?? 1) - 1] ?? ""}`
+      .toLowerCase();
 
-  /* ================= FILTER ================= */
+    return text.includes(tableSearch.toLowerCase());
+  });
 
-  const filtered = payments.filter((p: any) =>
-    p.students.full_name
-      .toLowerCase()
-      .includes(tableSearch.toLowerCase())
-  );
-
-  /* ================= UI ================= */
+  const yearOptions = Array.from({ length: 6 }).map((_, i) => currentYear - i);
 
   return (
     <DashboardLayout
       title="Mensualidades"
       subtitle="Control de pagos mensuales"
     >
-      <div className="flex gap-4 mb-6">
-        <Input
-          placeholder="Buscar pagos registrados..."
-          value={tableSearch}
-          onChange={(e) => setTableSearch(e.target.value)}
-        />
+      {/* TOOLBAR */}
+      <div className="flex flex-col md:flex-row gap-4 mb-6">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" />
+          <Input
+            placeholder="Buscar pagos registrados..."
+            value={tableSearch}
+            className="pl-9"
+            onChange={(e) => setTableSearch(e.target.value)}
+          />
+        </div>
 
-        <Dialog open={open} onOpenChange={setOpen}>
+        <div className="w-full md:w-40">
+          <label className="text-sm font-medium block mb-1">Año</label>
+          <select
+            className="w-full border rounded-md px-3 py-2 text-sm"
+            value={year}
+            onChange={(e) => setYear(Number(e.target.value))}
+          >
+            {yearOptions.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <Dialog
+          open={open}
+          onOpenChange={(value) => {
+            setOpen(value);
+            if (!value) {
+              setForm({
+                student_id: "",
+                charge_id: "",
+                recibido: "",
+                pay_currency: "USD",
+              });
+              setSearch("");
+              setStudentCharges([]);
+            }
+          }}
+        >
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
@@ -450,67 +448,67 @@ export default function Pagos() {
             </Button>
           </DialogTrigger>
 
-          <DialogContent className="max-w-xl">
+          <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>Pago de Mensualidad</DialogTitle>
             </DialogHeader>
 
-            {/* ================= BUSCAR ESTUDIANTE ================= */}
+            <div className="space-y-5 mt-2">
+              {/* BÚSQUEDA ESTUDIANTE */}
+              <div>
+                <label className="text-sm font-medium block mb-2">
+                  Estudiante
+                </label>
+                <Input
+                  placeholder="Buscar estudiante..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
 
-            <label className="text-sm font-medium">Estudiante</label>
-            <Input
-              placeholder="Buscar estudiante..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-
-            {search && (
-              <div className="border rounded max-h-40 overflow-y-auto">
-                {students
-                  .filter((s: any) =>
-                    s.full_name.toLowerCase().includes(search.toLowerCase())
-                  )
-                  .map((s: any) => (
-                    <div
-                      key={s.id}
-                      className="p-2 hover:bg-muted cursor-pointer"
-                      onClick={async () => {
-                        setForm({
-                          student_id: s.id,
-                          charge_id: "",
-                          recibido: "",
-                          pay_currency: "USD",
-                        });
-                        setSearch(s.full_name);
-                        await loadStudentPendingCharges(s.id);
-                      }}
-                    >
-                      <p>{s.full_name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {s.grades?.name} {s.sections?.name}
-                      </p>
-                    </div>
-                  ))}
+                {search && (
+                  <div className="border rounded max-h-40 overflow-y-auto mt-2">
+                    {students
+                      .filter((s: any) =>
+                        s.full_name.toLowerCase().includes(search.toLowerCase())
+                      )
+                      .map((s: any) => (
+                        <div
+                          key={s.id}
+                          className="p-3 hover:bg-muted cursor-pointer border-b last:border-b-0"
+                          onClick={async () => {
+                            setForm({
+                              student_id: s.id,
+                              charge_id: "",
+                              recibido: "",
+                              pay_currency: "USD",
+                            });
+                            setSearch(s.full_name);
+                            await loadStudentOpenCharges(s.id);
+                          }}
+                        >
+                          <p className="font-medium">{s.full_name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {s.grades?.name} {s.sections?.name}
+                          </p>
+                        </div>
+                      ))}
+                  </div>
+                )}
               </div>
-            )}
 
+              {/* CARGO */}
+              {form.student_id && (
+                <>
+                  <div>
+                    <label className="text-sm font-medium block mb-2">
+                      Mes pendiente
+                    </label>
 
-            {/* ================= MES ================= */}
-
-            {form.student_id && (
-              <>
-                <div className="mt-4">
-                  <label className="text-sm font-medium">Mes</label>
-                  {(() => {
-                    if (studentPendingCharges.length === 0) {
-                      return (
-                        <p className="text-sm text-muted-foreground mt-2">
-                          Este estudiante no tiene mensualidades pendientes.
-                        </p>
-                      );
-                    }
-
-                    return (
+                    {studentCharges.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        Este estudiante no tiene mensualidades pendientes o parciales.
+                      </p>
+                    ) : (
                       <select
                         className="w-full border rounded px-3 py-2"
                         value={form.charge_id}
@@ -522,154 +520,185 @@ export default function Pagos() {
                           })
                         }
                       >
-                        <option value="">Seleccionar mes pendiente</option>
-
-                        {studentPendingCharges.map((c: any) => (
-                          <option key={c.id} value={c.id}>
-                            {MONTHS[c.month - 1]}
-                          </option>
-                        ))}
+                        <option value="">Seleccionar mensualidad</option>
+                        {studentCharges.map((c: any) => {
+                          const saldoMes = Number(c.amount || 0) - Number(c.paid_amount || 0);
+                          return (
+                            <option key={c.id} value={c.id}>
+                              {MONTHS[c.month - 1]} - {c.status} - {c.currency === "USD" ? "$" : "C$"} {Number(saldoMes).toFixed(2)}
+                            </option>
+                          );
+                        })}
                       </select>
-                    );
-                  })()}
-                </div>
+                    )}
+                  </div>
 
-
-                {/* ================= TOTAL ================= */}
-
-                {selectedCharge && (
-                  <>
-                    <div className="grid grid-cols-2 gap-4 mt-4">
-                      <div>
-                        <label className="text-sm font-medium">
-                          Total mensualidad
-                        </label>
-                        <Input
-                          disabled
-                          value={`${simboloPago} ${totalInPayCurrency.toFixed(2)}`}
-                        />
+                  {/* RESUMEN */}
+                  {selectedCharge && (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 rounded-lg border p-4 bg-muted/20">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Total del cargo</p>
+                          <p className="font-semibold">
+                            {simboloCargo} {totalOriginal.toFixed(2)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Abonado</p>
+                          <p className="font-semibold">
+                            {simboloCargo} {paidSoFar.toFixed(2)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Saldo pendiente</p>
+                          <p className="font-semibold">
+                            {simboloPago} {remainingInPayCurrency.toFixed(2)}
+                          </p>
+                        </div>
                       </div>
 
-                      <div>
-                        <label className="text-sm font-medium">
-                          Moneda de pago
-                        </label>
-                        <select
-                          className="w-full border rounded px-3 py-2 mt-2"
-                          value={form.pay_currency}
-                          onChange={(e) =>
-                            setForm({ ...form, pay_currency: e.target.value, recibido: "" })
-                          }
-                        >
-                          <option value="USD">Dólares ($)</option>
-                          <option value="NIO">Córdobas (C$)</option>
-                        </select>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-sm font-medium block mb-2">
+                            Moneda de pago
+                          </label>
+                          <select
+                            className="w-full border rounded px-3 py-2"
+                            value={form.pay_currency}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                pay_currency: e.target.value,
+                                recibido: "",
+                              })
+                            }
+                          >
+                            <option value="USD">Dólares ($)</option>
+                            <option value="NIO">Córdobas (C$)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-sm font-medium block mb-2">
+                            Recibido
+                          </label>
+                          <Input
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength={payCurrency === "USD" ? 3 : 4}
+                            value={String(form.recibido ?? "")}
+                            onChange={(e) => {
+                              const onlyDigits = e.target.value.replace(/\D/g, "");
+                              const limited =
+                                payCurrency === "USD"
+                                  ? onlyDigits.slice(0, 3)
+                                  : onlyDigits.slice(0, 4);
+
+                              setForm({ ...form, recibido: limited });
+                            }}
+                          />
+                        </div>
                       </div>
-                    </div>
 
-                    {/* ================= RECIBIDO ================= */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-sm font-medium block mb-2">
+                            Monto aplicado en este pago
+                          </label>
+                          <Input
+                            disabled
+                            value={`${simboloPago} ${amountAppliedInPayCurrency.toFixed(2)}`}
+                          />
+                        </div>
 
-                    <div className="grid grid-cols-2 gap-4 mt-4">
-                      <div>
-                        <label className="text-sm font-medium">
-                          Recibido
-                        </label>
-
-                        <Input
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          maxLength={payCurrency === "USD" ? 3 : 4}
-                          value={String(form.recibido ?? "")}
-                          onChange={(e) => {
-                            const onlyDigits = e.target.value.replace(/\D/g, "");
-                            const limited = payCurrency === "USD"
-                              ? onlyDigits.slice(0, 3)
-                              : onlyDigits.slice(0, 4);
-
-                            setForm({ ...form, recibido: limited });
-                          }}
-                        />
+                        <div>
+                          <label className="text-sm font-medium block mb-2">
+                            Cambio
+                          </label>
+                          <Input
+                            disabled
+                            value={`${simboloPago} ${cambio.toFixed(2)}`}
+                          />
+                        </div>
                       </div>
 
-                      <div>
-                        <label className="text-sm font-medium">
-                          Cambio
-                        </label>
-                        <Input disabled value={cambio > 0 ? `${simboloPago} ${cambio.toFixed(2)}` : ""} />
+                      <div className="rounded-lg border p-3 bg-amber-50 text-sm">
+                        Se aceptan pagos parciales. Si el monto recibido es menor al saldo, la mensualidad quedará en <strong>PARCIAL</strong>.
                       </div>
-                    </div>
 
-                    {/* ================= BOTÓN ================= */}
-
-                    <Button
-                      className="w-full mt-6"
-                      disabled={
-                        !form.charge_id ||
-                        recibidoNum < totalInPayCurrency ||
-                        createPayment.isPending
-                      }
-                      onClick={() => createPayment.mutate()}
-                    >
-                      {createPayment.isPending ? "Registrando..." : "Registrar Pago"}
-                    </Button>
-                  </>
-                )}
-              </>
-            )}
+                      <Button
+                        className="w-full"
+                        disabled={
+                          !form.charge_id ||
+                          recibidoNum <= 0 ||
+                          createPayment.isPending
+                        }
+                        onClick={() => createPayment.mutate()}
+                      >
+                        {createPayment.isPending ? "Registrando..." : "Registrar Pago"}
+                      </Button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
           </DialogContent>
-
         </Dialog>
-
       </div>
 
-      {/* ================= TABLE ================= */}
-
+      {/* TABLA */}
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Estudiante</TableHead>
-            <TableHead>Concepto</TableHead>
             <TableHead>Mes</TableHead>
-            <TableHead>Monto</TableHead>
+            <TableHead>Monto aplicado</TableHead>
+            <TableHead>Recibido</TableHead>
+            <TableHead>Cambio</TableHead>
             <TableHead>Moneda</TableHead>
+            <TableHead>Estado pago</TableHead>
             <TableHead>Fecha</TableHead>
-            <TableHead>Estado</TableHead>
             <TableHead>Acción</TableHead>
           </TableRow>
         </TableHeader>
 
         <TableBody>
           {filtered.map((p: any) => {
-            const simbolo =
-              p.currency === "USD" ? "$" : "C$";
+            const simbolo = p.currency === "USD" ? "$" : "C$";
 
             return (
               <TableRow key={p.id}>
-                <TableCell>
-                  {p.students.full_name}
-                </TableCell>
-                <TableCell>Mensualidad</TableCell>
+                <TableCell>{p.students?.full_name}</TableCell>
                 <TableCell>{MONTHS[p.month - 1] ?? p.month}</TableCell>
                 <TableCell>
-                  {simbolo} {p.amount}
+                  {simbolo} {Number(p.amount || 0).toFixed(2)}
                 </TableCell>
                 <TableCell>
-                  {p.currency === "USD"
-                    ? "Dólares"
-                    : "Córdobas"}
+                  {simbolo} {Number(p.received_amount || 0).toFixed(2)}
                 </TableCell>
                 <TableCell>
-                  {new Date(p.paid_at).toLocaleString(
-                    "es-NI",
-                    {
-                      timeZone: "America/Managua",
+                  {simbolo} {Number(p.change_amount || 0).toFixed(2)}
+                </TableCell>
+                <TableCell>
+                  {p.currency === "USD" ? "Dólares" : "Córdobas"}
+                </TableCell>
+                <TableCell>
+                  <Badge
+                    className={
+                      p.description === "PAGADO"
+                        ? "bg-green-100 text-green-700"
+                        : p.description === "PARCIAL"
+                          ? "bg-yellow-100 text-yellow-700"
+                          : "bg-blue-100 text-blue-700"
                     }
-                  )}
+                  >
+                    {p.description ?? "COMPLETADO"}
+                  </Badge>
                 </TableCell>
                 <TableCell>
-                  <Badge className="bg-green-100 text-green-700">
-                    Pagado
-                  </Badge>
+                  {new Date(p.paid_at).toLocaleString("es-NI", {
+                    timeZone: "America/Managua",
+                  })}
                 </TableCell>
                 <TableCell>
                   <Button
@@ -677,18 +706,15 @@ export default function Pagos() {
                     variant="outline"
                     onClick={() =>
                       imprimirRecibo({
-                        estudiante:
-                          p.students.full_name,
-                        mes: p.month,
-                        total: p.amount,
-                        recibido: p.amount,
-                        cambio: 0,
+                        estudiante: p.students?.full_name,
+                        mes: MONTHS[p.month - 1] ?? p.month,
+                        total: Number(p.amount || 0).toFixed(2),
+                        aplicado: Number(p.amount || 0).toFixed(2),
+                        recibido: Number(p.received_amount || 0).toFixed(2),
+                        cambio: Number(p.change_amount || 0).toFixed(2),
                         moneda: simbolo,
-                        fecha: new Date(
-                          p.paid_at
-                        ).toLocaleString("es-NI", {
-                          timeZone:
-                            "America/Managua",
+                        fecha: new Date(p.paid_at).toLocaleString("es-NI", {
+                          timeZone: "America/Managua",
                         }),
                       })
                     }

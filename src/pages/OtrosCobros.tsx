@@ -50,7 +50,26 @@ type PaymentItem = {
   is_active: boolean;
 };
 
+type AppUser = {
+  id: string;
+  role: "Administrador" | "Cobrador";
+  is_active: boolean;
+};
+
 const ITEM_CATEGORIES = ["PROMOCION", "GRADUACION", "LIBROS", "UNIFORME", "OTROS"] as const;
+
+const isMissingTableError = (error: any) => {
+  const msg = String(error?.message || "").toLowerCase();
+  const details = String(error?.details || "").toLowerCase();
+  return (
+    error?.code === "PGRST205" ||
+    msg.includes("schema cache") ||
+    msg.includes("payment_items") ||
+    msg.includes("other_payments") ||
+    details.includes("payment_items") ||
+    details.includes("other_payments")
+  );
+};
 
 const fetchStudents = async (): Promise<Student[]> => {
   const { data, error } = await supabase
@@ -69,6 +88,21 @@ const fetchItems = async (): Promise<PaymentItem[]> => {
     .order("name");
   if (error) throw error;
   return data ?? [];
+};
+
+const fetchCurrentAppUser = async (): Promise<AppUser | null> => {
+  const { data: authData, error: authErr } = await supabase.auth.getUser();
+  if (authErr) throw authErr;
+  const userId = authData.user?.id;
+  if (!userId) return null;
+
+  const { data, error } = await supabase
+    .from("app_users")
+    .select("id, role, is_active")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
 };
 
 const fetchOtherPayments = async (year: number) => {
@@ -121,11 +155,19 @@ export default function OtrosCobros() {
   });
 
   const { data: students = [] } = useQuery({ queryKey: ["students-active"], queryFn: fetchStudents });
-  const { data: items = [] } = useQuery({ queryKey: ["payment-items"], queryFn: fetchItems });
-  const { data: payments = [], isLoading: loadingPayments } = useQuery({
+  const { data: items = [], error: itemsError } = useQuery({ queryKey: ["payment-items"], queryFn: fetchItems, retry: false });
+  const { data: currentAppUser } = useQuery({
+    queryKey: ["current-app-user"],
+    queryFn: fetchCurrentAppUser,
+    retry: false,
+  });
+  const { data: payments = [], isLoading: loadingPayments, error: paymentsError } = useQuery({
     queryKey: ["other-payments", year],
     queryFn: () => fetchOtherPayments(year),
+    retry: false,
   });
+
+  const schemaNotReady = isMissingTableError(itemsError) || isMissingTableError(paymentsError);
 
   const selectedItem = useMemo(
     () => items.find((it) => it.id === paymentForm.item_id),
@@ -169,9 +211,12 @@ export default function OtrosCobros() {
   const applied = Math.min(amountToCharge, receivedNum);
   const change = Math.max(receivedNum - applied, 0);
   const status = applied + 0.0001 >= amountToCharge ? "COMPLETADO" : "PARCIAL";
+  const canManageItems =
+    !!currentAppUser && currentAppUser.is_active && currentAppUser.role === "Administrador";
 
   const createItem = useMutation({
     mutationFn: async () => {
+      if (!canManageItems) throw new Error("Solo un administrador puede crear conceptos.");
       if (!itemForm.name.trim()) throw new Error("Nombre requerido");
       const amount = Number(itemForm.default_amount || 0);
       if (amount <= 0) throw new Error("Monto inválido");
@@ -191,7 +236,10 @@ export default function OtrosCobros() {
       setOpenItem(false);
       setItemForm({ name: "", category: "OTROS", default_amount: "", currency: "NIO" });
     },
-    onError: (e: any) => toast.error(e?.message || "No se pudo crear el concepto"),
+    onError: (e: any) =>
+      isMissingTableError(e)
+        ? toast.error("Falta aplicar la migración del módulo. Ejecuta 002_other_payments_module.sql en Supabase.")
+        : toast.error(e?.message || "No se pudo crear el concepto"),
   });
 
   const createOtherPayment = useMutation({
@@ -230,7 +278,10 @@ export default function OtrosCobros() {
       });
       setStudentSearch("");
     },
-    onError: (e: any) => toast.error(e?.message || "No se pudo registrar el pago"),
+    onError: (e: any) =>
+      isMissingTableError(e)
+        ? toast.error("Falta aplicar la migración del módulo. Ejecuta 002_other_payments_module.sql en Supabase.")
+        : toast.error(e?.message || "No se pudo registrar el pago"),
   });
 
   return (
@@ -238,6 +289,14 @@ export default function OtrosCobros() {
       title="Otros Cobros"
       subtitle="Graduación, promoción, libros, uniformes y cobros especiales"
     >
+      {schemaNotReady && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          Este módulo requiere tablas nuevas en Supabase. Ejecuta el script
+          <strong> `supabase/migrations/002_other_payments_module.sql` </strong>
+          en el SQL Editor y luego recarga la página.
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row gap-3 mb-4">
         <Input
           placeholder="Buscar por estudiante o concepto..."
@@ -262,7 +321,7 @@ export default function OtrosCobros() {
 
         <Dialog open={openItem} onOpenChange={setOpenItem}>
           <DialogTrigger asChild>
-            <Button variant="outline">
+            <Button variant="outline" disabled={schemaNotReady || !canManageItems}>
               <Plus className="h-4 w-4 mr-2" />
               Nuevo Concepto
             </Button>
@@ -345,7 +404,7 @@ export default function OtrosCobros() {
 
         <Dialog open={openPayment} onOpenChange={setOpenPayment}>
           <DialogTrigger asChild>
-            <Button>
+            <Button disabled={schemaNotReady}>
               <Plus className="h-4 w-4 mr-2" />
               Registrar Pago
             </Button>
@@ -506,6 +565,12 @@ export default function OtrosCobros() {
           </DialogContent>
         </Dialog>
       </div>
+
+      {!schemaNotReady && !canManageItems && (
+        <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+          Tu rol actual no puede crear conceptos nuevos. Sí puedes registrar pagos usando conceptos existentes.
+        </div>
+      )}
 
       <Table>
         <TableHeader>

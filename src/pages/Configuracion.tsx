@@ -80,6 +80,7 @@ type AppUserRow = { id: string; email: string; full_name: string | null; role: s
 const DEFAULT_MONTHLY_NIO = 770;
 const DEFAULT_MONTHLY_USD = 21;
 const DEFAULT_EXCHANGE_RATE = 36.67;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /* ================= FETCHERS ================= */
 
@@ -271,6 +272,20 @@ const Configuracion = () => {
       for (const g of grades) {
         const vals = preciosByGrade[g.id];
         if (!vals) continue;
+        const amountNio = Number(vals.nio);
+        const amountUsd = Number(vals.usd);
+        if (!Number.isFinite(amountNio) || amountNio <= 0 || !Number.isFinite(amountUsd) || amountUsd <= 0) {
+          throw new Error(`Precio inválido en "${g.name}". Verifica C$ y USD.`);
+        }
+      }
+
+      if (!Number.isFinite(Number(matriculaNio)) || Number(matriculaNio) <= 0) {
+        throw new Error("La matrícula en C$ debe ser mayor que cero.");
+      }
+
+      for (const g of grades) {
+        const vals = preciosByGrade[g.id];
+        if (!vals) continue;
         const amountNio = Number(vals.nio) || 0;
         const amountUsd = Number(vals.usd) || 0;
         const existing = gradePricesByGradeId.get(g.id);
@@ -355,6 +370,19 @@ const Configuracion = () => {
 
   const createOrUpdateUser = useMutation({
     mutationFn: async () => {
+      const email = userForm.email.trim();
+      if (!EMAIL_REGEX.test(email)) {
+        throw new Error("Correo inválido. Verifica el formato.");
+      }
+      if (!userEditId) {
+        if (!userForm.full_name.trim()) {
+          throw new Error("El nombre del usuario es obligatorio.");
+        }
+        if ((userForm.password || "").length < 8) {
+          throw new Error("La contraseña debe tener al menos 8 caracteres.");
+        }
+      }
+
       if (userEditId) {
         const { error } = await supabase
           .from("app_users")
@@ -369,7 +397,7 @@ const Configuracion = () => {
         return;
       }
       const { data, error } = await supabase.auth.signUp({
-        email: userForm.email,
+        email,
         password: userForm.password,
         options: { data: { full_name: userForm.full_name } },
       });
@@ -377,7 +405,7 @@ const Configuracion = () => {
       if (!data.user) throw new Error("No se creó el usuario");
       const { error: insertError } = await supabase.from("app_users").insert({
         id: data.user.id,
-        email: userForm.email,
+        email,
         full_name: userForm.full_name || null,
         role: userForm.role,
         is_active: true,

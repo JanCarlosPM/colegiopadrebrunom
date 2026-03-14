@@ -28,6 +28,7 @@ import {
 import { Plus, Search, Pencil, Power, RotateCcw } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 /* =========================
    FETCHERS
@@ -78,7 +79,12 @@ const fetchSectionsByGrade = async (gradeId: string) => {
 export default function Estudiantes() {
   const qc = useQueryClient();
 
-  const { data: studentsData = [] } = useQuery({
+  const {
+    data: studentsData = [],
+    isError: studentsError,
+    error: studentsErrorDetail,
+    refetch: refetchStudents,
+  } = useQuery({
     queryKey: ["students"],
     queryFn: fetchStudents,
   });
@@ -99,6 +105,7 @@ export default function Estudiantes() {
   const [yearFilter, setYearFilter] = useState("todos");
   const [openAdd, setOpenAdd] = useState(false);
   const [openEdit, setOpenEdit] = useState(false);
+  const [togglingStudentId, setTogglingStudentId] = useState<string | null>(null);
 
   const emptyForm = {
     id: null,
@@ -142,19 +149,24 @@ export default function Estudiantes() {
           status: "ACTIVO",
         });
 
-      if (studentError) throw studentError;
+      if (studentError) {
+        // Evita dejar tutor huérfano si falla la creación del estudiante.
+        await supabase.from("guardians").delete().eq("id", guardian.id);
+        throw studentError;
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["students"] });
       setOpenAdd(false);
       setForm(emptyForm);
       setSelectedGradeId("");
+      toast.success("Estudiante guardado correctamente.");
     },
     onError: (error: any) => {
       if (error.code === "23505") {
-        alert("Este estudiante ya está registrado.");
+        toast.error("Este estudiante ya está registrado.");
       } else {
-        alert("Error al guardar estudiante.");
+        toast.error("Error al guardar estudiante.");
       }
     },
   });
@@ -201,9 +213,10 @@ export default function Estudiantes() {
       setOpenEdit(false);
       setForm(emptyForm);
       setSelectedGradeId("");
+      toast.success("Estudiante actualizado correctamente.");
     },
     onError: () => {
-      alert("Error al actualizar estudiante.");
+      toast.error("Error al actualizar estudiante.");
     },
   });
 
@@ -223,12 +236,20 @@ export default function Estudiantes() {
         .eq("id", id);
 
       if (error) throw error;
+      return { id };
+    },
+    onMutate: async ({ id }) => {
+      setTogglingStudentId(id);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["students"] });
+      toast.success("Estado del estudiante actualizado.");
     },
     onError: () => {
-      alert("No se pudo cambiar el estado del estudiante.");
+      toast.error("No se pudo cambiar el estado del estudiante.");
+    },
+    onSettled: () => {
+      setTogglingStudentId(null);
     },
   });
 
@@ -283,6 +304,17 @@ export default function Estudiantes() {
 
   return (
     <DashboardLayout title="Estudiantes" subtitle="Gestión de estudiantes">
+      {studentsError && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 flex items-center justify-between gap-2">
+          <span>
+            No se pudieron cargar los estudiantes. {String((studentsErrorDetail as any)?.message || "")}
+          </span>
+          <Button variant="outline" size="sm" onClick={() => refetchStudents()}>
+            Reintentar
+          </Button>
+        </div>
+      )}
+
       {/* TOOLBAR */}
       <div className="flex flex-col md:flex-row gap-4 mb-6">
         <div className="relative flex-1 max-w-md">
@@ -549,6 +581,7 @@ export default function Estudiantes() {
                 <Button
                   size="sm"
                   variant={s.estado === "ACTIVO" ? "destructive" : "default"}
+                  disabled={toggleStudentStatus.isPending && togglingStudentId === s.id}
                   onClick={() =>
                     toggleStudentStatus.mutate({
                       id: s.id,
@@ -556,7 +589,9 @@ export default function Estudiantes() {
                     })
                   }
                 >
-                  {s.estado === "ACTIVO" ? (
+                  {toggleStudentStatus.isPending && togglingStudentId === s.id ? (
+                    "Procesando..."
+                  ) : s.estado === "ACTIVO" ? (
                     <>
                       <Power className="h-4 w-4 mr-1" />
                       Inactivar

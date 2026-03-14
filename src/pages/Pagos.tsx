@@ -36,7 +36,10 @@ import { FormField } from "@/components/common/FormField";
 
 function imprimirRecibo(data: any) {
   const win = window.open("", "", "width=800,height=600");
-  if (!win) return;
+  if (!win) {
+    toast.error("No se pudo abrir el recibo. Habilita pop-ups en tu navegador.");
+    return;
+  }
 
   win.document.write(`
     <html>

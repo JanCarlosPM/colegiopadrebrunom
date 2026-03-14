@@ -319,7 +319,15 @@ export default function OtrosCobros() {
           </Select>
         </div>
 
-        <Dialog open={openItem} onOpenChange={setOpenItem}>
+        <Dialog
+          open={openItem}
+          onOpenChange={(value) => {
+            setOpenItem(value);
+            if (!value) {
+              setItemForm({ name: "", category: "OTROS", default_amount: "", currency: "NIO" });
+            }
+          }}
+        >
           <DialogTrigger asChild>
             <Button variant="outline" disabled={schemaNotReady || !canManageItems}>
               <Plus className="h-4 w-4 mr-2" />
@@ -395,14 +403,33 @@ export default function OtrosCobros() {
               <Button variant="outline" onClick={() => setOpenItem(false)}>
                 Cancelar
               </Button>
-              <Button onClick={() => createItem.mutate()} disabled={createItem.isPending}>
+              <Button
+                onClick={() => createItem.mutate()}
+                disabled={createItem.isPending || !itemForm.name.trim() || Number(itemForm.default_amount || 0) <= 0}
+              >
                 {createItem.isPending ? "Guardando..." : "Guardar concepto"}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        <Dialog open={openPayment} onOpenChange={setOpenPayment}>
+        <Dialog
+          open={openPayment}
+          onOpenChange={(value) => {
+            setOpenPayment(value);
+            if (!value) {
+              setPaymentForm({
+                student_id: "",
+                item_id: "",
+                amount: "",
+                received: "",
+                currency: "NIO",
+                notes: "",
+              });
+              setStudentSearch("");
+            }
+          }}
+        >
           <DialogTrigger asChild>
             <Button disabled={schemaNotReady}>
               <Plus className="h-4 w-4 mr-2" />
@@ -426,6 +453,11 @@ export default function OtrosCobros() {
                 />
                 {studentSearch && (
                   <div className="border rounded max-h-40 overflow-y-auto mt-2">
+                    {filteredStudents.length === 0 && (
+                      <p className="p-3 text-sm text-muted-foreground">
+                        No se encontraron estudiantes.
+                      </p>
+                    )}
                     {filteredStudents.map((st) => (
                       <div
                         key={st.id}

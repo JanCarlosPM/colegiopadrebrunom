@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { toast } from "sonner";
 
 type ReciboMatriculaData = {
   numero?: string;
@@ -159,7 +160,10 @@ function ReciboMatriculaTemplate({
 
 export function imprimirReciboMatricula(data: ReciboMatriculaData) {
   const win = window.open("", "_blank", "width=1400,height=1100");
-  if (!win) return;
+  if (!win) {
+    toast.error("No se pudo abrir el recibo. Habilita los pop-ups del navegador.");
+    return;
+  }
 
   win.document.write(`
     <html>

@@ -29,7 +29,6 @@ const Dashboard = () => {
         { count: totalStudents, error: studentsError },
         { data: enrollments, error: enrollmentsError },
         { data: monthlyPayments, error: monthlyPaymentsError },
-        { data: allMonthlyPayments, error: allMonthlyPaymentsError },
         { data: allMonthlyCharges, error: allMonthlyChargesError },
         { data: allPayments, error: allPaymentsError },
       ] = await Promise.all([
@@ -51,14 +50,6 @@ const Dashboard = () => {
           .gte("paid_at", yearStart)
           .lt("paid_at", yearEnd),
 
-        // Todos los pagos de mensualidad del año actual
-        supabase
-          .from("payments")
-          .select("student_id, amount, concept, month, currency, paid_at")
-          .eq("concept", "MENSUALIDAD")
-          .gte("paid_at", yearStart)
-          .lt("paid_at", yearEnd),
-
         // Todos los charges de mensualidad del año actual
         supabase
           .from("charges")
@@ -77,7 +68,6 @@ const Dashboard = () => {
       if (studentsError) throw studentsError;
       if (enrollmentsError) throw enrollmentsError;
       if (monthlyPaymentsError) throw monthlyPaymentsError;
-      if (allMonthlyPaymentsError) throw allMonthlyPaymentsError;
       if (allMonthlyChargesError) throw allMonthlyChargesError;
       if (allPaymentsError) throw allPaymentsError;
 

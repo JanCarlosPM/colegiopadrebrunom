@@ -2,7 +2,6 @@ import { useState } from "react";
 import { GraduationCap, Eye, EyeOff, Lock, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
@@ -40,8 +39,10 @@ const handleForgotPassword = async () => {
         return;
       }
 
+      const redirectBase =
+        import.meta.env.VITE_APP_URL?.replace(/\/$/, "") || window.location.origin;
       const { error } = await supabase.auth.resetPasswordForEmail(username, {
-        redirectTo: "http://localhost:8080/reset-password",
+        redirectTo: `${redirectBase}/reset-password`,
       });
 
       if (error) {
@@ -74,12 +75,13 @@ const handleForgotPassword = async () => {
           {/* Login Form */}
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
-              <label className="input-label">Usuario</label>
+              <label className="input-label">Correo</label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  type="text"
-                  placeholder="Ingrese su usuario"
+                  type="email"
+                  autoComplete="username"
+                  placeholder="Ingrese su correo"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="pl-10"
@@ -94,6 +96,7 @@ const handleForgotPassword = async () => {
                 <Input
                   type={showPassword ? "text" : "password"}
                   placeholder="Ingrese su contraseña"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="pl-10 pr-10"

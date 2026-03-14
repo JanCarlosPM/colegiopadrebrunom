@@ -7,11 +7,20 @@ import { useNavigate } from "react-router-dom";
 
 export default function ResetPassword() {
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const navigate = useNavigate();
 
   const handleUpdatePassword = async () => {
     if (!password) {
       toast.error("Ingrese nueva contraseña");
+      return;
+    }
+    if (password.length < 8) {
+      toast.error("La contraseña debe tener al menos 8 caracteres");
+      return;
+    }
+    if (password !== confirmPassword) {
+      toast.error("Las contraseñas no coinciden");
       return;
     }
 
@@ -37,6 +46,12 @@ export default function ResetPassword() {
           placeholder="Nueva contraseña"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+        />
+        <Input
+          type="password"
+          placeholder="Confirmar contraseña"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
         />
         <Button onClick={handleUpdatePassword} className="w-full">
           Actualizar contraseña

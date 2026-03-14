@@ -14,15 +14,13 @@ import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, Download, Users, DollarSign, AlertTriangle } from "lucide-react";
-import * as XLSX from "xlsx";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import {
   MONTHS_ES,
   convertCurrency,
   formatMoney,
   normalizeCurrency,
 } from "@/lib/billing";
+import { toast } from "sonner";
 
 const REPORT_CATEGORIES = {
   resumen: "Resumen",
@@ -136,6 +134,7 @@ export default function Reportes() {
   const [mes, setMes] = useState("todos");
   const [fechaDesde, setFechaDesde] = useState("");
   const [fechaHasta, setFechaHasta] = useState("");
+  const [exporting, setExporting] = useState<"pdf" | "excel" | null>(null);
 
   const year = Number(anio);
 
@@ -146,6 +145,12 @@ export default function Reportes() {
         : students.filter((s: { grades?: { name?: string } }) => s.grades?.name === grado),
     [students, grado]
   );
+
+  const studentsById = useMemo(() => {
+    const map = new Map<string, any>();
+    students.forEach((student: any) => map.set(student.id, student));
+    return map;
+  }, [students]);
 
   const paymentsInYear = useMemo(
     () => payments.filter((p: { academic_year?: number }) => Number(p.academic_year) === year),
@@ -304,7 +309,7 @@ export default function Reportes() {
         list = list.filter((p: { academic_year?: number }) => Number(p.academic_year) === year);
       }
       return list.map((p: any) => {
-        const s = students.find((x: { id: string }) => x.id === p.student_id);
+        const s = studentsById.get(p.student_id);
         return {
           fecha: p.paid_at ? new Date(p.paid_at).toLocaleString("es-NI") : "—",
           estudiante: s?.full_name ?? "—",
@@ -330,7 +335,7 @@ export default function Reportes() {
         list = list.filter((p: { paid_at?: string }) => new Date(p.paid_at || 0) <= end);
       }
       return list.map((p: any) => {
-        const s = students.find((x: { id: string }) => x.id === p.student_id);
+        const s = studentsById.get(p.student_id);
         return {
           fecha: p.paid_at ? new Date(p.paid_at).toLocaleString("es-NI") : "—",
           estudiante: s?.full_name ?? "—",
@@ -431,7 +436,7 @@ export default function Reportes() {
         ? paymentsInYear
         : paymentsInYear.filter((p: any) => p.concept !== "MENSUALIDAD" || Number(p.month) === Number(mes));
       filtered.forEach((p: any) => {
-        const s = filteredStudents.find((x: any) => x.id === p.student_id) ?? students.find((x: any) => x.id === p.student_id);
+        const s = studentsById.get(p.student_id);
         rows.push({
           nombre: s?.full_name ?? "—",
           grado: s?.grades?.name ?? "—",
@@ -531,7 +536,7 @@ export default function Reportes() {
     chargesInYear,
     paymentsInYear,
     payments,
-    students,
+    studentsById,
     year,
     mes,
     fechaDesde,
@@ -547,42 +552,66 @@ export default function Reportes() {
     return { matriculados: matriculados?.valor ?? "0", pendMat: pendMat?.valor ?? "0", pendMen: pendMen?.valor ?? "0" };
   }, [tipoReporte, reportData]);
 
-  const exportExcel = () => {
-    const sheetData = Array.isArray(reportData) && reportData.length > 0 && typeof reportData[0] === "object"
-      ? reportData.map((r: any) => {
-          const obj = { ...r };
-          if ("total_nio" in obj) delete obj.total_nio;
-          if ("total_usd" in obj) delete obj.total_usd;
-          return obj;
-        })
-      : reportData;
-    const worksheet = XLSX.utils.json_to_sheet(sheetData as object[]);
-    const workbook = XLSX.utils.book_new();
-    const sheetName = REPORT_TYPES.find((t) => t.value === tipoReporte)?.label ?? "Reporte";
-    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31));
-    const nombre = `reporte_${tipoReporte}_${anio}_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(workbook, nombre);
+  const exportExcel = async () => {
+    if (reportData.length === 0 || exporting) return;
+    try {
+      setExporting("excel");
+      const XLSX = await import("xlsx");
+      const sheetData =
+        Array.isArray(reportData) && reportData.length > 0 && typeof reportData[0] === "object"
+          ? reportData.map((r: any) => {
+              const obj = { ...r };
+              if ("total_nio" in obj) delete obj.total_nio;
+              if ("total_usd" in obj) delete obj.total_usd;
+              return obj;
+            })
+          : reportData;
+      const worksheet = XLSX.utils.json_to_sheet(sheetData as object[]);
+      const workbook = XLSX.utils.book_new();
+      const sheetName = REPORT_TYPES.find((t) => t.value === tipoReporte)?.label ?? "Reporte";
+      XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31));
+      const nombre = `reporte_${tipoReporte}_${anio}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(workbook, nombre);
+    } catch (error) {
+      console.error(error);
+      toast.error("No se pudo exportar el archivo Excel.");
+    } finally {
+      setExporting(null);
+    }
   };
 
-  const exportPDF = () => {
-    const doc = new jsPDF();
-    const title = REPORT_TYPES.find((t) => t.value === tipoReporte)?.label ?? tipoReporte;
-    doc.setFontSize(14);
-    doc.text(`Reporte: ${title}`, 14, 15);
-    doc.setFontSize(10);
-    doc.text(`Año: ${anio}  |  Generado: ${new Date().toLocaleDateString("es-NI")}`, 14, 22);
+  const exportPDF = async () => {
+    if (reportData.length === 0 || exporting) return;
+    try {
+      setExporting("pdf");
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+        import("jspdf"),
+        import("jspdf-autotable"),
+      ]);
+      const doc = new jsPDF();
+      const title = REPORT_TYPES.find((t) => t.value === tipoReporte)?.label ?? tipoReporte;
+      doc.setFontSize(14);
+      doc.text(`Reporte: ${title}`, 14, 15);
+      doc.setFontSize(10);
+      doc.text(`Año: ${anio}  |  Generado: ${new Date().toLocaleDateString("es-NI")}`, 14, 22);
 
-    const headers = reportData.length > 0 ? Object.keys(reportData[0]).filter((k) => !k.startsWith("total_")) : [];
-    const body = (reportData as any[]).map((r) => headers.map((h) => (r[h] != null ? String(r[h]) : "—")));
+      const headers = reportData.length > 0 ? Object.keys(reportData[0]).filter((k) => !k.startsWith("total_")) : [];
+      const body = (reportData as any[]).map((r) => headers.map((h) => (r[h] != null ? String(r[h]) : "—")));
 
-    autoTable(doc, {
-      head: [headers],
-      body,
-      startY: 28,
-      styles: { fontSize: 8 },
-    });
+      autoTable(doc, {
+        head: [headers],
+        body,
+        startY: 28,
+        styles: { fontSize: 8 },
+      });
 
-    doc.save(`reporte_${tipoReporte}_${anio}.pdf`);
+      doc.save(`reporte_${tipoReporte}_${anio}.pdf`);
+    } catch (error) {
+      console.error(error);
+      toast.error("No se pudo exportar el PDF.");
+    } finally {
+      setExporting(null);
+    }
   };
 
   const gradeOptions = useMemo(
@@ -724,13 +753,13 @@ export default function Reportes() {
             {reportData.length} {reportData.length === 1 ? "registro" : "registros"} encontrados
           </p>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={exportPDF} disabled={reportData.length === 0}>
+            <Button variant="outline" size="sm" onClick={exportPDF} disabled={reportData.length === 0 || exporting !== null}>
               <FileText className="h-4 w-4 mr-2" />
-              PDF
+              {exporting === "pdf" ? "Exportando..." : "PDF"}
             </Button>
-            <Button variant="outline" size="sm" onClick={exportExcel} disabled={reportData.length === 0}>
+            <Button variant="outline" size="sm" onClick={exportExcel} disabled={reportData.length === 0 || exporting !== null}>
               <Download className="h-4 w-4 mr-2" />
-              Excel
+              {exporting === "excel" ? "Exportando..." : "Excel"}
             </Button>
           </div>
         </div>

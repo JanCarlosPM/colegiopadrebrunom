@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,7 +40,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { GraduationCap, Plus, Edit, Trash2, Save, Upload, Loader2 } from "lucide-react";
+import { GraduationCap, Plus, Edit, Trash2, Save, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -172,6 +172,12 @@ const Configuracion = () => {
   const [userForm, setUserForm] = useState({ full_name: "", email: "", role: "Cobrador" as const, password: "", is_active: true });
   const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
 
+  const gradePricesByGradeId = useMemo(() => {
+    const map = new Map<string, GradePriceRow>();
+    gradePrices.forEach((price) => map.set(price.grade_id, price));
+    return map;
+  }, [gradePrices]);
+
   useEffect(() => {
     if (settings) {
       setGeneralForm({
@@ -207,7 +213,7 @@ const Configuracion = () => {
   useEffect(() => {
     const next: Record<string, { nio: string; usd: string }> = {};
     grades.forEach((g) => {
-      const pr = gradePrices.find((p) => p.grade_id === g.id);
+      const pr = gradePricesByGradeId.get(g.id);
       const nioValue = Number(
         pr?.monthly_amount ??
         pr?.amount_nio ??
@@ -224,7 +230,7 @@ const Configuracion = () => {
       };
     });
     setPreciosByGrade(next);
-  }, [grades, gradePrices]);
+  }, [grades, gradePricesByGradeId]);
 
   const currentYear = new Date().getFullYear();
   const yearOptions = [currentYear - 1, currentYear, currentYear + 1];
@@ -267,7 +273,7 @@ const Configuracion = () => {
         if (!vals) continue;
         const amountNio = Number(vals.nio) || 0;
         const amountUsd = Number(vals.usd) || 0;
-        const existing = gradePrices.find((p) => p.grade_id === g.id);
+        const existing = gradePricesByGradeId.get(g.id);
         const now = new Date().toISOString();
 
         const newSchemaPayload = {

@@ -9,17 +9,45 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Download } from "lucide-react";
+import { FileText, Download, Users, DollarSign, AlertTriangle } from "lucide-react";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
 const MONTHS = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
+const REPORT_CATEGORIES = {
+  resumen: "Resumen",
+  estudiantes: "Estudiantes",
+  matriculas: "Matrículas",
+  mensualidades: "Mensualidades",
+  financiero: "Ingresos y caja",
+  morosidad: "Morosidad",
+} as const;
+
+const REPORT_TYPES: { value: string; label: string; category: keyof typeof REPORT_CATEGORIES }[] = [
+  { value: "resumen-ejecutivo", label: "Resumen ejecutivo", category: "resumen" },
+  { value: "estudiantes", label: "Listado de estudiantes", category: "estudiantes" },
+  { value: "estudiantes-por-grado", label: "Estudiantes por grado", category: "estudiantes" },
+  { value: "matriculas", label: "Matrículas del año", category: "matriculas" },
+  { value: "matriculas-por-estado", label: "Matrículas por estado", category: "matriculas" },
+  { value: "mensualidades", label: "Cargos de mensualidad", category: "mensualidades" },
+  { value: "pagos", label: "Pagos registrados", category: "financiero" },
+  { value: "ingresos-por-mes", label: "Ingresos por mes", category: "financiero" },
+  { value: "caja", label: "Movimientos de caja", category: "financiero" },
+  { value: "devoluciones", label: "Devoluciones (cambio)", category: "financiero" },
+  { value: "solventes", label: "Estudiantes solventes", category: "morosidad" },
+  { value: "morosos", label: "Estudiantes morosos", category: "morosidad" },
+  { value: "morosidad-detallada", label: "Morosidad detallada", category: "morosidad" },
+  { value: "parciales", label: "Pagos parciales", category: "morosidad" },
+  { value: "pendientes", label: "Sin matrícula", category: "morosidad" },
 ];
 
 /* ================= FETCH ================= */
@@ -34,7 +62,6 @@ const fetchReportData = async () => {
       grades ( name ),
       sections ( name )
     `),
-
     supabase.from("enrollments").select(`
       id,
       student_id,
@@ -45,7 +72,6 @@ const fetchReportData = async () => {
       status,
       enrolled_at
     `),
-
     supabase.from("charges").select(`
       id,
       student_id,
@@ -53,12 +79,12 @@ const fetchReportData = async () => {
       concept,
       month,
       amount,
+      paid_amount,
       currency,
       status,
       due_date,
       created_at
     `),
-
     supabase.from("payments").select(`
       id,
       student_id,
@@ -67,6 +93,8 @@ const fetchReportData = async () => {
       academic_year,
       month,
       amount,
+      received_amount,
+      change_amount,
       currency,
       method,
       status,
@@ -101,41 +129,236 @@ export default function Reportes() {
   const charges = data?.charges ?? [];
   const payments = data?.payments ?? [];
 
-  const [tipoReporte, setTipoReporte] = useState("estudiantes");
+  const [tipoReporte, setTipoReporte] = useState("resumen-ejecutivo");
   const [grado, setGrado] = useState("todos");
   const [anio, setAnio] = useState(new Date().getFullYear().toString());
   const [mes, setMes] = useState("todos");
+  const [fechaDesde, setFechaDesde] = useState("");
+  const [fechaHasta, setFechaHasta] = useState("");
 
   const year = Number(anio);
 
-  const reportData = useMemo(() => {
-    const filteredStudents =
+  const filteredStudents = useMemo(
+    () =>
       grado === "todos"
         ? students
-        : students.filter((s: any) => s.grades?.name === grado);
+        : students.filter((s: { grades?: { name?: string } }) => s.grades?.name === grado),
+    [students, grado]
+  );
+
+  const paymentsInYear = useMemo(
+    () => payments.filter((p: { academic_year?: number }) => Number(p.academic_year) === year),
+    [payments, year]
+  );
+
+  const chargesInYear = useMemo(
+    () =>
+      charges.filter(
+        (c: { academic_year?: number; concept?: string }) =>
+          Number(c.academic_year) === year && c.concept === "MENSUALIDAD"
+      ),
+    [charges, year]
+  );
+
+  const enrollmentsInYear = useMemo(
+    () => enrollments.filter((e: { academic_year?: number }) => Number(e.academic_year) === year),
+    [enrollments, year]
+  );
+
+  const reportData = useMemo(() => {
+    if (tipoReporte === "resumen-ejecutivo") {
+      const totalMatriculados = enrollmentsInYear.length;
+      const ingresosMatriculaNIO = enrollmentsInYear.reduce(
+        (sum: number, e: { currency?: string; paid_amount?: number }) =>
+          e.currency === "NIO" ? sum + Number(e.paid_amount || 0) : sum,
+        0
+      );
+      const ingresosMatriculaUSD = enrollmentsInYear.reduce(
+        (sum: number, e: { currency?: string; paid_amount?: number }) =>
+          e.currency === "USD" ? sum + Number(e.paid_amount || 0) : sum,
+        0
+      );
+      const pagosMatricula = paymentsInYear.filter((p: { concept?: string }) => p.concept === "MATRICULA");
+      const ingresosMatriculaPagosNIO = pagosMatricula.reduce(
+        (sum: number, p: { currency?: string; amount?: number }) =>
+          p.currency === "NIO" ? sum + Number(p.amount || 0) : sum,
+        0
+      );
+      const ingresosMatriculaPagosUSD = pagosMatricula.reduce(
+        (sum: number, p: { currency?: string; amount?: number }) =>
+          p.currency === "USD" ? sum + Number(p.amount || 0) : sum,
+        0
+      );
+      const pagosMensualidad = paymentsInYear.filter((p: { concept?: string }) => p.concept === "MENSUALIDAD");
+      const ingresosMensualidadNIO = pagosMensualidad.reduce(
+        (sum: number, p: { currency?: string; amount?: number }) =>
+          p.currency === "NIO" ? sum + Number(p.amount || 0) : sum,
+        0
+      );
+      const ingresosMensualidadUSD = pagosMensualidad.reduce(
+        (sum: number, p: { currency?: string; amount?: number }) =>
+          p.currency === "USD" ? sum + Number(p.amount || 0) : sum,
+        0
+      );
+      const pendienteMatricula = enrollmentsInYear.reduce(
+        (sum: number, e: { total_amount?: number; paid_amount?: number }) =>
+          sum + Math.max(Number(e.total_amount || 0) - Number(e.paid_amount || 0), 0),
+        0
+      );
+      const pendienteMensualidades = chargesInYear.reduce(
+        (sum: number, c: { amount?: number; paid_amount?: number }) =>
+          sum + Math.max(Number(c.amount || 0) - Number(c.paid_amount || 0), 0),
+        0
+      );
+      return [
+        { indicador: "Matrículas del año", valor: totalMatriculados, tipo: "numero" },
+        { indicador: "Ingresos matrícula (C$)", valor: (ingresosMatriculaPagosNIO || ingresosMatriculaNIO).toFixed(2), tipo: "moneda" },
+        { indicador: "Ingresos matrícula (USD)", valor: (ingresosMatriculaPagosUSD || ingresosMatriculaUSD).toFixed(2), tipo: "moneda" },
+        { indicador: "Ingresos mensualidades (C$)", valor: ingresosMensualidadNIO.toFixed(2), tipo: "moneda" },
+        { indicador: "Ingresos mensualidades (USD)", valor: ingresosMensualidadUSD.toFixed(2), tipo: "moneda" },
+        { indicador: "Pendiente matrículas", valor: pendienteMatricula.toFixed(2), tipo: "moneda" },
+        { indicador: "Pendiente mensualidades", valor: pendienteMensualidades.toFixed(2), tipo: "moneda" },
+      ];
+    }
+
+    if (tipoReporte === "estudiantes-por-grado") {
+      const byGrade: Record<string, number> = {};
+      filteredStudents.forEach((s: { grades?: { name?: string }; status?: string }) => {
+        const g = s.grades?.name ?? "Sin grado";
+        if (s.status === "ACTIVO") byGrade[g] = (byGrade[g] || 0) + 1;
+      });
+      return Object.entries(byGrade)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([gradoNombre, cantidad]) => ({ grado: gradoNombre, cantidad, estudiantes: cantidad }));
+    }
+
+    if (tipoReporte === "matriculas-por-estado") {
+      const pagado = enrollmentsInYear.filter((e: { status?: string }) => e.status === "PAGADO").length;
+      const parcial = enrollmentsInYear.filter((e: { status?: string }) => e.status === "PARCIAL").length;
+      const pendiente = enrollmentsInYear.filter((e: { status?: string }) => e.status === "PENDIENTE").length;
+      return [
+        { estado: "PAGADO", cantidad: pagado },
+        { estado: "PARCIAL", cantidad: parcial },
+        { estado: "PENDIENTE", cantidad: pendiente },
+        { estado: "TOTAL", cantidad: enrollmentsInYear.length },
+      ];
+    }
+
+    if (tipoReporte === "ingresos-por-mes") {
+      const byMonth: Record<number, { nio: number; usd: number }> = {};
+      for (let m = 1; m <= 12; m++) byMonth[m] = { nio: 0, usd: 0 };
+      paymentsInYear.forEach((p: { month?: number; amount?: number; currency?: string }) => {
+        const m = p.month ?? 1;
+        if (p.currency === "NIO") byMonth[m].nio += Number(p.amount || 0);
+        else byMonth[m].usd += Number(p.amount || 0);
+      });
+      return Object.entries(byMonth).map(([mesNum, vals]) => ({
+        mes: MONTHS[Number(mesNum) - 1],
+        "C$": Number(vals.nio.toFixed(2)),
+        "$ USD": Number(vals.usd.toFixed(2)),
+        total_nio: vals.nio,
+        total_usd: vals.usd,
+      }));
+    }
+
+    if (tipoReporte === "caja") {
+      let list = [...payments];
+      if (fechaDesde) {
+        list = list.filter((p: { paid_at?: string }) => new Date(p.paid_at || 0) >= new Date(fechaDesde));
+      }
+      if (fechaHasta) {
+        const end = new Date(fechaHasta);
+        end.setHours(23, 59, 59, 999);
+        list = list.filter((p: { paid_at?: string }) => new Date(p.paid_at || 0) <= end);
+      }
+      if (year) {
+        list = list.filter((p: { academic_year?: number }) => Number(p.academic_year) === year);
+      }
+      return list.map((p: any) => {
+        const s = students.find((x: { id: string }) => x.id === p.student_id);
+        return {
+          fecha: p.paid_at ? new Date(p.paid_at).toLocaleString("es-NI") : "—",
+          estudiante: s?.full_name ?? "—",
+          grado: s?.grades?.name ?? "—",
+          concepto: p.concept ?? "—",
+          mes: p.concept === "MENSUALIDAD" && p.month ? MONTHS[p.month - 1] : "—",
+          monto: `${p.currency === "USD" ? "$" : "C$"} ${Number(p.amount || 0).toLocaleString()}`,
+          recibido: Number(p.received_amount ?? p.amount ?? 0).toLocaleString(),
+          cambio: Number(p.change_amount ?? 0).toLocaleString(),
+          metodo: p.method ?? "—",
+        };
+      });
+    }
+
+    if (tipoReporte === "devoluciones") {
+      const conCambio = payments.filter((p: { change_amount?: number }) => Number(p.change_amount || 0) > 0);
+      let list = conCambio;
+      if (year) list = list.filter((p: { academic_year?: number }) => Number(p.academic_year) === year);
+      if (fechaDesde) list = list.filter((p: { paid_at?: string }) => new Date(p.paid_at || 0) >= new Date(fechaDesde));
+      if (fechaHasta) {
+        const end = new Date(fechaHasta);
+        end.setHours(23, 59, 59, 999);
+        list = list.filter((p: { paid_at?: string }) => new Date(p.paid_at || 0) <= end);
+      }
+      return list.map((p: any) => {
+        const s = students.find((x: { id: string }) => x.id === p.student_id);
+        return {
+          fecha: p.paid_at ? new Date(p.paid_at).toLocaleString("es-NI") : "—",
+          estudiante: s?.full_name ?? "—",
+          concepto: p.concept ?? "—",
+          monto_pagado: `${p.currency === "USD" ? "$" : "C$"} ${Number(p.amount || 0).toLocaleString()}`,
+          recibido: Number(p.received_amount ?? 0).toLocaleString(),
+          devolucion: Number(p.change_amount ?? 0).toLocaleString(),
+        };
+      });
+    }
+
+    if (tipoReporte === "morosidad-detallada") {
+      const rows: any[] = [];
+      filteredStudents.forEach((s: any) => {
+        const studentCharges = chargesInYear.filter(
+          (c: any) =>
+            c.student_id === s.id &&
+            (c.status === "PENDIENTE" || c.status === "PARCIAL")
+        );
+        studentCharges.forEach((c: any) => {
+          const total = Number(c.amount || 0);
+          const pagado = Number(c.paid_amount || 0);
+          const pendiente = total - pagado;
+          if (pendiente <= 0) return;
+          rows.push({
+            estudiante: s.full_name,
+            grado: s.grades?.name ?? "—",
+            seccion: s.sections?.name ?? "—",
+            mes: c.month ? MONTHS[c.month - 1] : "—",
+            monto_cargo: `${c.currency === "USD" ? "$" : "C$"} ${total.toLocaleString()}`,
+            pagado: `${c.currency === "USD" ? "$" : "C$"} ${pagado.toLocaleString()}`,
+            pendiente: `${c.currency === "USD" ? "$" : "C$"} ${pendiente.toLocaleString()}`,
+            estado: c.status,
+          });
+        });
+      });
+      return rows;
+    }
 
     if (tipoReporte === "estudiantes") {
-      return filteredStudents.map((s: any) => ({
-        nombre: s.full_name,
-        grado: s.grades?.name ?? "—",
-        seccion: s.sections?.name ?? "—",
-        encargado: s.guardians?.full_name ?? "—",
-        telefono: s.guardians?.phone ?? "—",
-        estado: s.status ?? "—",
-      }));
+      return filteredStudents
+        .filter((s: { status?: string }) => s.status === "ACTIVO")
+        .map((s: any) => ({
+          nombre: s.full_name,
+          grado: s.grades?.name ?? "—",
+          seccion: s.sections?.name ?? "—",
+          encargado: s.guardians?.full_name ?? "—",
+          telefono: s.guardians?.phone ?? "—",
+          estado: s.status ?? "—",
+        }));
     }
 
     if (tipoReporte === "matriculas") {
       return filteredStudents
         .map((s: any) => {
-          const enrollment = enrollments.find(
-            (e: any) =>
-              e.student_id === s.id &&
-              Number(e.academic_year) === year
-          );
-
+          const enrollment = enrollmentsInYear.find((e: any) => e.student_id === s.id);
           if (!enrollment) return null;
-
           return {
             nombre: s.full_name,
             grado: s.grades?.name ?? "—",
@@ -143,9 +366,7 @@ export default function Reportes() {
             total: `${enrollment.currency === "USD" ? "$" : "C$"} ${Number(enrollment.total_amount || 0).toLocaleString()}`,
             pagado: `${enrollment.currency === "USD" ? "$" : "C$"} ${Number(enrollment.paid_amount || 0).toLocaleString()}`,
             estado: enrollment.status,
-            fecha: enrollment.enrolled_at
-              ? new Date(enrollment.enrolled_at).toLocaleDateString("es-NI")
-              : "—",
+            fecha: enrollment.enrolled_at ? new Date(enrollment.enrolled_at).toLocaleDateString("es-NI") : "—",
           };
         })
         .filter(Boolean);
@@ -153,16 +374,12 @@ export default function Reportes() {
 
     if (tipoReporte === "mensualidades") {
       const rows: any[] = [];
-
       filteredStudents.forEach((s: any) => {
-        const studentCharges = charges.filter(
+        const studentCharges = chargesInYear.filter(
           (c: any) =>
-            c.student_id === s.id &&
-            Number(c.academic_year) === year &&
-            c.concept === "MENSUALIDAD" &&
+            s.id === c.student_id &&
             (mes === "todos" || Number(c.month) === Number(mes))
         );
-
         studentCharges.forEach((c: any) => {
           rows.push({
             nombre: s.full_name,
@@ -170,69 +387,45 @@ export default function Reportes() {
             seccion: s.sections?.name ?? "—",
             mes: c.month ? MONTHS[c.month - 1] : "—",
             monto: `${c.currency === "USD" ? "$" : "C$"} ${Number(c.amount || 0).toLocaleString()}`,
+            pagado: `${c.currency === "USD" ? "$" : "C$"} ${Number(c.paid_amount || 0).toLocaleString()}`,
             estado: c.status,
-            vencimiento: c.due_date
-              ? new Date(c.due_date).toLocaleDateString("es-NI")
-              : "—",
+            vencimiento: c.due_date ? new Date(c.due_date).toLocaleDateString("es-NI") : "—",
           });
         });
       });
-
       return rows;
     }
 
     if (tipoReporte === "pagos") {
       const rows: any[] = [];
-
-      filteredStudents.forEach((s: any) => {
-        const studentPayments = payments.filter(
-          (p: any) =>
-            p.student_id === s.id &&
-            Number(p.academic_year) === year &&
-            (mes === "todos" ||
-              p.concept !== "MENSUALIDAD" ||
-              Number(p.month) === Number(mes))
-        );
-
-        studentPayments.forEach((p: any) => {
-          rows.push({
-            nombre: s.full_name,
-            grado: s.grades?.name ?? "—",
-            seccion: s.sections?.name ?? "—",
-            concepto: p.concept,
-            mes:
-              p.concept === "MENSUALIDAD" && p.month
-                ? MONTHS[p.month - 1]
-                : "—",
-            monto: `${p.currency === "USD" ? "$" : "C$"} ${Number(p.amount || 0).toLocaleString()}`,
-            metodo: p.method ?? "—",
-            estado: p.status ?? "—",
-            fecha: p.paid_at
-              ? new Date(p.paid_at).toLocaleDateString("es-NI")
-              : "—",
-          });
+      const filtered = mes === "todos"
+        ? paymentsInYear
+        : paymentsInYear.filter((p: any) => p.concept !== "MENSUALIDAD" || Number(p.month) === Number(mes));
+      filtered.forEach((p: any) => {
+        const s = filteredStudents.find((x: any) => x.id === p.student_id) ?? students.find((x: any) => x.id === p.student_id);
+        rows.push({
+          nombre: s?.full_name ?? "—",
+          grado: s?.grades?.name ?? "—",
+          seccion: s?.sections?.name ?? "—",
+          concepto: p.concept,
+          mes: p.concept === "MENSUALIDAD" && p.month ? MONTHS[p.month - 1] : "—",
+          monto: `${p.currency === "USD" ? "$" : "C$"} ${Number(p.amount || 0).toLocaleString()}`,
+          metodo: p.method ?? "—",
+          estado: p.status ?? "—",
+          fecha: p.paid_at ? new Date(p.paid_at).toLocaleString("es-NI") : "—",
         });
       });
-
       return rows;
     }
 
     if (tipoReporte === "solventes") {
       return filteredStudents
         .map((s: any) => {
-          const studentCharges = charges.filter(
-            (c: any) =>
-              c.student_id === s.id &&
-              Number(c.academic_year) === year &&
-              c.concept === "MENSUALIDAD"
-          );
-
-          const hasPending = studentCharges.some(
-            (c: any) => c.status === "PENDIENTE" || c.status === "PARCIAL"
-          );
-
+          const studentCharges = chargesInYear.filter((c: any) => c.student_id === s.id);
+          const hasPending = studentCharges.some((c: any) => c.status === "PENDIENTE" || c.status === "PARCIAL");
           if (hasPending) return null;
-
+          const hasAny = studentCharges.length > 0;
+          if (!hasAny) return null;
           return {
             nombre: s.full_name,
             grado: s.grades?.name ?? "—",
@@ -246,24 +439,18 @@ export default function Reportes() {
     if (tipoReporte === "morosos") {
       return filteredStudents
         .map((s: any) => {
-          const studentCharges = charges.filter(
-            (c: any) =>
-              c.student_id === s.id &&
-              Number(c.academic_year) === year &&
-              c.concept === "MENSUALIDAD"
-          );
-
-          const hasPending = studentCharges.some(
-            (c: any) => c.status === "PENDIENTE"
-          );
-
+          const studentCharges = chargesInYear.filter((c: any) => c.student_id === s.id);
+          const hasPending = studentCharges.some((c: any) => c.status === "PENDIENTE");
           if (!hasPending) return null;
-
+          const pendienteTotal = studentCharges
+            .filter((c: any) => c.status === "PENDIENTE" || c.status === "PARCIAL")
+            .reduce((sum: number, c: any) => sum + Math.max(Number(c.amount || 0) - Number(c.paid_amount || 0), 0), 0);
           return {
             nombre: s.full_name,
             grado: s.grades?.name ?? "—",
             seccion: s.sections?.name ?? "—",
             estado: "MOROSO",
+            pendiente: `C$${pendienteTotal.toLocaleString()}`,
           };
         })
         .filter(Boolean);
@@ -272,22 +459,13 @@ export default function Reportes() {
     if (tipoReporte === "parciales") {
       return filteredStudents
         .map((s: any) => {
-          const enrollment = enrollments.find(
-            (e: any) =>
-              e.student_id === s.id &&
-              Number(e.academic_year) === year &&
-              e.status === "PARCIAL"
+          const enrollment = enrollmentsInYear.find(
+            (e: any) => e.student_id === s.id && e.status === "PARCIAL"
           );
-
-          const chargeParcial = charges.some(
-            (c: any) =>
-              c.student_id === s.id &&
-              Number(c.academic_year) === year &&
-              c.status === "PARCIAL"
+          const chargeParcial = chargesInYear.some(
+            (c: any) => c.student_id === s.id && c.status === "PARCIAL"
           );
-
           if (!enrollment && !chargeParcial) return null;
-
           return {
             nombre: s.full_name,
             grado: s.grades?.name ?? "—",
@@ -301,166 +479,264 @@ export default function Reportes() {
     if (tipoReporte === "pendientes") {
       return filteredStudents
         .map((s: any) => {
-          const enrollment = enrollments.find(
-            (e: any) =>
-              e.student_id === s.id &&
-              Number(e.academic_year) === year
-          );
-
+          const enrollment = enrollmentsInYear.find((e: any) => e.student_id === s.id);
           if (enrollment) return null;
-
           return {
             nombre: s.full_name,
             grado: s.grades?.name ?? "—",
             seccion: s.sections?.name ?? "—",
-            estado: "PENDIENTE",
+            estado: "SIN MATRÍCULA",
           };
         })
         .filter(Boolean);
     }
 
     return [];
-  }, [students, enrollments, charges, payments, tipoReporte, grado, year, mes]);
+  }, [
+    tipoReporte,
+    filteredStudents,
+    enrollmentsInYear,
+    chargesInYear,
+    paymentsInYear,
+    payments,
+    students,
+    year,
+    mes,
+    fechaDesde,
+    fechaHasta,
+  ]);
 
-  /* ================= EXPORT EXCEL ================= */
+  const summaryCards = useMemo(() => {
+    if (tipoReporte !== "resumen-ejecutivo" || reportData.length === 0) return null;
+    const d = reportData as { indicador: string; valor: string; tipo?: string }[];
+    const matriculados = d.find((r) => r.indicador === "Matrículas del año");
+    const pendMat = d.find((r) => r.indicador === "Pendiente matrículas");
+    const pendMen = d.find((r) => r.indicador === "Pendiente mensualidades");
+    return { matriculados: matriculados?.valor ?? "0", pendMat: pendMat?.valor ?? "0", pendMen: pendMen?.valor ?? "0" };
+  }, [tipoReporte, reportData]);
 
   const exportExcel = () => {
-    const worksheet = XLSX.utils.json_to_sheet(reportData);
+    const sheetData = Array.isArray(reportData) && reportData.length > 0 && typeof reportData[0] === "object"
+      ? reportData.map((r: any) => {
+          const obj = { ...r };
+          if ("total_nio" in obj) delete obj.total_nio;
+          if ("total_usd" in obj) delete obj.total_usd;
+          return obj;
+        })
+      : reportData;
+    const worksheet = XLSX.utils.json_to_sheet(sheetData as object[]);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Reporte");
-    XLSX.writeFile(workbook, `reporte_${tipoReporte}_${anio}.xlsx`);
+    const sheetName = REPORT_TYPES.find((t) => t.value === tipoReporte)?.label ?? "Reporte";
+    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31));
+    const nombre = `reporte_${tipoReporte}_${anio}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(workbook, nombre);
   };
-
-  /* ================= EXPORT PDF ================= */
 
   const exportPDF = () => {
     const doc = new jsPDF();
-    doc.text(`Reporte ${tipoReporte} - ${anio}`, 14, 15);
+    const title = REPORT_TYPES.find((t) => t.value === tipoReporte)?.label ?? tipoReporte;
+    doc.setFontSize(14);
+    doc.text(`Reporte: ${title}`, 14, 15);
+    doc.setFontSize(10);
+    doc.text(`Año: ${anio}  |  Generado: ${new Date().toLocaleDateString("es-NI")}`, 14, 22);
 
-    const headers =
-      reportData.length > 0 ? Object.keys(reportData[0]) : [];
-
-    const body = reportData.map((r: any) =>
-      headers.map((h) => r[h])
-    );
+    const headers = reportData.length > 0 ? Object.keys(reportData[0]).filter((k) => !k.startsWith("total_")) : [];
+    const body = (reportData as any[]).map((r) => headers.map((h) => (r[h] != null ? String(r[h]) : "—")));
 
     autoTable(doc, {
       head: [headers],
       body,
-      startY: 20,
+      startY: 28,
+      styles: { fontSize: 8 },
     });
 
     doc.save(`reporte_${tipoReporte}_${anio}.pdf`);
   };
 
-  const gradeOptions = [
-    ...new Set(
-      students
-        .map((s: any) => s.grades?.name)
-        .filter(Boolean)
-    ),
-  ];
+  const gradeOptions = useMemo(
+    () => [...new Set(students.map((s: any) => s.grades?.name).filter(Boolean))],
+    [students]
+  );
+
+  const showDateRange = tipoReporte === "caja" || tipoReporte === "devoluciones";
+  const showMes = !["resumen-ejecutivo", "estudiantes-por-grado", "matriculas-por-estado", "ingresos-por-mes", "estudiantes", "pendientes"].includes(tipoReporte);
 
   return (
-    <DashboardLayout
-      title="Reportes"
-      subtitle="Reportes basados en la estructura real de la BD"
-    >
-      <Card className="p-4 mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Select value={tipoReporte} onValueChange={setTipoReporte}>
-          <SelectTrigger>
-            <SelectValue placeholder="Tipo Reporte" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="estudiantes">Estudiantes</SelectItem>
-            <SelectItem value="matriculas">Matrículas</SelectItem>
-            <SelectItem value="mensualidades">Mensualidades</SelectItem>
-            <SelectItem value="pagos">Pagos</SelectItem>
-            <SelectItem value="solventes">Solventes</SelectItem>
-            <SelectItem value="morosos">Morosos</SelectItem>
-            <SelectItem value="parciales">Parciales</SelectItem>
-            <SelectItem value="pendientes">Pendientes</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Select value={grado} onValueChange={setGrado}>
-          <SelectTrigger>
-            <SelectValue placeholder="Grado" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todos</SelectItem>
-            {gradeOptions.map((g: any) => (
-              <SelectItem key={g} value={g}>
-                {g}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={mes} onValueChange={setMes}>
-          <SelectTrigger>
-            <SelectValue placeholder="Mes" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todos</SelectItem>
-            {MONTHS.map((m, i) => (
-              <SelectItem key={i + 1} value={String(i + 1)}>
-                {m}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Input
-          type="number"
-          value={anio}
-          onChange={(e) => setAnio(e.target.value)}
-        />
-      </Card>
-
+    <DashboardLayout title="Reportes" subtitle="Generar reportes de estudiantes, matrículas, ingresos y morosidad">
       <Card className="p-4 mb-6">
-        <p className="mb-4 font-semibold">
-          {reportData.length} registros encontrados
-        </p>
+        <CardHeader className="p-0 mb-4">
+          <CardTitle className="text-base">Filtros</CardTitle>
+          <CardDescription>Seleccione el tipo de reporte y los criterios</CardDescription>
+        </CardHeader>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="space-y-2">
+            <Label>Tipo de reporte</Label>
+            <Select value={tipoReporte} onValueChange={setTipoReporte}>
+              <SelectTrigger>
+                <SelectValue placeholder="Tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(REPORT_CATEGORIES).map(([key, label]) => (
+                  <div key={key}>
+                    <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">{label}</div>
+                    {REPORT_TYPES.filter((t) => t.category === key).map((t) => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </div>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-        <div className="overflow-auto max-h-96">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b">
-                {reportData.length > 0 &&
-                  Object.keys(reportData[0]).map((key) => (
-                    <th key={key} className="text-left p-2 capitalize">
-                      {key}
-                    </th>
+          <div className="space-y-2">
+            <Label>Año</Label>
+            <Input
+              type="number"
+              min="2020"
+              max="2030"
+              value={anio}
+              onChange={(e) => setAnio(e.target.value)}
+            />
+          </div>
+
+          {showMes && (
+            <div className="space-y-2">
+              <Label>Mes</Label>
+              <Select value={mes} onValueChange={setMes}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos</SelectItem>
+                  {MONTHS.map((m, i) => (
+                    <SelectItem key={i} value={String(i + 1)}>
+                      {m}
+                    </SelectItem>
                   ))}
-              </tr>
-            </thead>
-            <tbody>
-              {reportData.map((row: any, i: number) => (
-                <tr key={i} className="border-b">
-                  {Object.values(row).map((value: any, j: number) => (
-                    <td key={j} className="p-2">
-                      {String(value)}
-                    </td>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {tipoReporte !== "estudiantes-por-grado" && tipoReporte !== "matriculas-por-estado" && tipoReporte !== "resumen-ejecutivo" && tipoReporte !== "ingresos-por-mes" && (
+            <div className="space-y-2">
+              <Label>Grado</Label>
+              <Select value={grado} onValueChange={setGrado}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Grado" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos</SelectItem>
+                  {gradeOptions.map((g: string) => (
+                    <SelectItem key={g} value={g}>
+                      {g}
+                    </SelectItem>
                   ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {showDateRange && (
+            <>
+              <div className="space-y-2">
+                <Label>Desde</Label>
+                <Input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Hasta</Label>
+                <Input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} />
+              </div>
+            </>
+          )}
         </div>
       </Card>
 
-      <div className="flex gap-4">
-        <Button onClick={exportPDF}>
-          <FileText className="h-4 w-4 mr-2" />
-          Exportar PDF
-        </Button>
+      {summaryCards && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <Card>
+            <CardContent className="pt-4">
+              <div className="flex items-center gap-2">
+                <Users className="h-5 w-5 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Matrículas del año</span>
+              </div>
+              <p className="text-2xl font-semibold mt-1">{summaryCards.matriculados}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="flex items-center gap-2">
+                <DollarSign className="h-5 w-5 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Pendiente matrículas (C$)</span>
+              </div>
+              <p className="text-2xl font-semibold mt-1">C$ {Number(summaryCards.pendMat).toLocaleString()}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Pendiente mensualidades (C$)</span>
+              </div>
+              <p className="text-2xl font-semibold mt-1">C$ {Number(summaryCards.pendMen).toLocaleString()}</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
-        <Button onClick={exportExcel}>
-          <Download className="h-4 w-4 mr-2" />
-          Exportar Excel
-        </Button>
-      </div>
+      <Card className="p-4 mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <p className="font-semibold">
+            {reportData.length} {reportData.length === 1 ? "registro" : "registros"} encontrados
+          </p>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={exportPDF} disabled={reportData.length === 0}>
+              <FileText className="h-4 w-4 mr-2" />
+              PDF
+            </Button>
+            <Button variant="outline" size="sm" onClick={exportExcel} disabled={reportData.length === 0}>
+              <Download className="h-4 w-4 mr-2" />
+              Excel
+            </Button>
+          </div>
+        </div>
+
+        <div className="overflow-auto max-h-[28rem]">
+          {reportData.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">No hay datos para los filtros seleccionados.</p>
+          ) : (
+            <table className="w-full text-sm border-collapse">
+              <thead className="sticky top-0 bg-muted/80 backdrop-blur">
+                <tr className="border-b">
+                  {reportData.length > 0 &&
+                    Object.keys(reportData[0])
+                      .filter((k) => !k.startsWith("total_"))
+                      .map((key) => (
+                        <th key={key} className="text-left p-2 font-medium capitalize whitespace-nowrap">
+                          {key.replace(/_/g, " ")}
+                        </th>
+                      ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(reportData as any[]).map((row: any, i: number) => (
+                  <tr key={i} className="border-b hover:bg-muted/30">
+                    {Object.entries(row)
+                      .filter(([k]) => !k.startsWith("total_"))
+                      .map(([key, value]) => (
+                        <td key={key} className="p-2">
+                          {value != null ? String(value) : "—"}
+                        </td>
+                      ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </Card>
     </DashboardLayout>
   );
 }

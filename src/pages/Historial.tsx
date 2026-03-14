@@ -17,6 +17,8 @@ const MONTHS = [
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ];
 
+const RATE_USD_TO_NIO = 36.67;
+
 /* =========================
    COMPONENT
 ========================= */
@@ -208,42 +210,11 @@ export default function Historial() {
     );
   }, [payments]);
 
-  const totalPendingByCurrency = useMemo(() => {
-    return charges
-      .filter((c) => c.status !== "PAGADO")
-      .reduce(
-        (acc, c) => {
-          const pending = Math.max(
-            Number(c.amount || 0) - Number(c.paid_amount || 0),
-            0
-          );
-          if ((c.currency ?? "NIO") === "USD") acc.usd += pending;
-          else acc.nio += pending;
-          return acc;
-        },
-        { nio: 0, usd: 0 }
-      );
-  }, [charges]);
-
   const monthlyRows = useMemo(() => {
     return MONTHS.map((monthName, i) => {
       const monthNumber = i + 1;
       const monthCharges = charges.filter((c) => Number(c.month) === monthNumber);
       const monthPayments = payments.filter((p) => Number(p.month) === monthNumber);
-
-      const totalCharge = monthCharges.reduce(
-        (sum, c) => sum + Number(c.amount || 0),
-        0
-      );
-      const totalPaidInCharge = monthCharges.reduce(
-        (sum, c) => sum + Number(c.paid_amount || 0),
-        0
-      );
-      const totalPaidByPayments = monthPayments.reduce(
-        (sum, p) => sum + Number(p.amount || 0),
-        0
-      );
-      const saldo = Math.max(totalCharge - totalPaidInCharge, 0);
 
       const latestPayment =
         monthPayments.length > 0
@@ -263,28 +234,76 @@ export default function Historial() {
             )[0]
           : null;
 
-      const currency = latestCharge?.currency ?? latestPayment?.currency ?? "NIO";
+      const chargeCurrency = latestCharge?.currency ?? "NIO";
+      const totalCharge = Number(latestCharge?.amount || 0);
+      const paidInChargeCurrency = Number(latestCharge?.paid_amount || 0);
+      const saldoChargeCurrency = Math.max(totalCharge - paidInChargeCurrency, 0);
+
+      const totalChargeNio =
+        totalCharge > 0
+          ? chargeCurrency === "USD"
+            ? totalCharge * RATE_USD_TO_NIO
+            : totalCharge
+          : 0;
+
+      const totalChargeUsd =
+        totalCharge > 0
+          ? chargeCurrency === "USD"
+            ? totalCharge
+            : totalCharge / RATE_USD_TO_NIO
+          : 0;
+
+      const paidNio = monthPayments
+        .filter((p) => (p.currency ?? "NIO") === "NIO")
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      const paidUsd = monthPayments
+        .filter((p) => (p.currency ?? "NIO") === "USD")
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+      const changeNio = monthPayments
+        .filter((p) => (p.currency ?? "NIO") === "NIO")
+        .reduce((sum, p) => sum + Number(p.change_amount || 0), 0);
+      const changeUsd = monthPayments
+        .filter((p) => (p.currency ?? "NIO") === "USD")
+        .reduce((sum, p) => sum + Number(p.change_amount || 0), 0);
 
       let status = "Sin cargo";
-      if (monthCharges.length > 0 && saldo <= 0) status = "Pagado";
+      if (monthCharges.length > 0 && saldoChargeCurrency <= 0) status = "Pagado";
       else if (
         monthCharges.length > 0 &&
-        (totalPaidInCharge > 0 || totalPaidByPayments > 0)
+        (paidInChargeCurrency > 0 || monthPayments.length > 0)
       )
         status = "Parcial";
       else if (monthCharges.length > 0) status = "Pendiente";
 
       return {
         monthName,
-        currency,
+        chargeCurrency,
         totalCharge,
-        totalPaid: Math.max(totalPaidInCharge, totalPaidByPayments),
-        saldo,
+        totalChargeNio,
+        totalChargeUsd,
+        paidNio,
+        paidUsd,
+        changeNio,
+        changeUsd,
+        saldoChargeCurrency,
         latestPaymentDate: latestPayment?.paid_at ?? null,
         status,
       };
     });
   }, [charges, payments]);
+
+  const totalPendingByCurrency = useMemo(() => {
+    return monthlyRows.reduce(
+      (acc, row) => {
+        if (row.status !== "Pendiente" && row.status !== "Parcial") return acc;
+        if (row.chargeCurrency === "USD") acc.usd += row.saldoChargeCurrency;
+        else acc.nio += row.saldoChargeCurrency;
+        return acc;
+      },
+      { nio: 0, usd: 0 }
+    );
+  }, [monthlyRows]);
 
   const monthsPaid = useMemo(() => {
     return monthlyRows.filter((m) => m.status === "Pagado").length;
@@ -500,17 +519,16 @@ export default function Historial() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Mes</TableHead>
-                    <TableHead>Cargo</TableHead>
+                    <TableHead>Total mensualidad</TableHead>
                     <TableHead>Pagado</TableHead>
-                    <TableHead>Saldo</TableHead>
-                    <TableHead>Último pago</TableHead>
+                    <TableHead>Cambio</TableHead>
+                    <TableHead>Fecha de pago</TableHead>
                     <TableHead>Estado</TableHead>
                   </TableRow>
                 </TableHeader>
 
                 <TableBody>
                   {monthlyRows.map((row, i) => {
-                    const symbol = row.currency === "USD" ? "$" : "C$";
                     return (
                       <TableRow key={i}>
                         <TableCell className="font-medium">
@@ -519,19 +537,37 @@ export default function Historial() {
 
                         <TableCell>
                           {row.totalCharge > 0
-                            ? `${symbol} ${Number(row.totalCharge).toLocaleString()}`
+                            ? `C$ ${Number(row.totalChargeNio).toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })} | $ ${Number(row.totalChargeUsd).toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}`
                             : "—"}
                         </TableCell>
 
                         <TableCell>
-                          {row.totalPaid > 0
-                            ? `${symbol} ${Number(row.totalPaid).toLocaleString()}`
+                          {row.paidNio > 0 || row.paidUsd > 0
+                            ? `C$ ${Number(row.paidNio).toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })} | $ ${Number(row.paidUsd).toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}`
                             : "—"}
                         </TableCell>
 
                         <TableCell>
-                          {row.totalCharge > 0
-                            ? `${symbol} ${Number(row.saldo).toLocaleString()}`
+                          {row.changeNio > 0 || row.changeUsd > 0
+                            ? `C$ ${Number(row.changeNio).toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })} | $ ${Number(row.changeUsd).toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}`
                             : "—"}
                         </TableCell>
 

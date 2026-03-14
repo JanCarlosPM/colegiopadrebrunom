@@ -159,6 +159,7 @@ export default function Matriculas() {
   const [recibidoInput, setRecibidoInput] = useState("");
   const [tableSearch, setTableSearch] = useState("");
   const [total, setTotal] = useState(300);
+  const [enrollmentHint, setEnrollmentHint] = useState("");
 
   const cambio = Math.max(paid - saldoPendiente, 0);
 
@@ -482,6 +483,11 @@ export default function Matriculas() {
                           setTotal(totalOriginal);
                           setSaldoPendiente(Math.max(restante, 0));
                           setCurrency(normalizeCurrency(existing.currency));
+                          setEnrollmentHint(
+                            restante <= 0
+                              ? "Este estudiante ya está matriculado y su matrícula está pagada en este año."
+                              : "Este estudiante ya está matriculado. Solo se cobrará el saldo pendiente."
+                          );
                         } else {
                           const base =
                             currency === "USD"
@@ -489,6 +495,7 @@ export default function Matriculas() {
                               : (matriculaSettings?.matriculaNio ?? 300);
                           setTotal(base);
                           setSaldoPendiente(base);
+                          setEnrollmentHint("");
                         }
 
                         setPaid(0);
@@ -526,6 +533,7 @@ export default function Matriculas() {
                       setSaldoPendiente(0);
                       setRecibidoInput("");
                       setPaid(0);
+                      setEnrollmentHint("");
                     }}
                   >
                     Cambiar
@@ -583,6 +591,12 @@ export default function Matriculas() {
                 </select>
               </div>
             </div>
+
+            {enrollmentHint && (
+              <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                {enrollmentHint}
+              </div>
+            )}
 
             {/* RECIBIDO + CAMBIO */}
             <div className="space-y-3 mt-4">

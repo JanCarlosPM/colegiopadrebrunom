@@ -250,7 +250,19 @@ export default function Pagos() {
 
   const chargeCurrency = selectedCharge?.currency ?? "USD";
   const payCurrency = form.pay_currency ?? "USD";
-  const recibidoNum = Number(form.recibido || 0);
+  const maxIntegerDigits = payCurrency === "USD" ? 3 : 4;
+  const recibidoRaw = String(form.recibido ?? "").trim();
+  const recibidoNormalized = recibidoRaw.replace(",", ".");
+  const [recibidoIntPart = ""] = recibidoNormalized.split(".");
+  const recibidoNum = Number(recibidoNormalized || 0);
+  const isRecibidoFormatValid = /^\d*\.?\d{0,2}$/.test(recibidoNormalized);
+  const isRecibidoDigitsValid = recibidoIntPart.length <= maxIntegerDigits;
+  const isRecibidoPositive = recibidoNum > 0;
+  const isRecibidoValid =
+    recibidoNormalized.length > 0 &&
+    isRecibidoFormatValid &&
+    isRecibidoDigitsValid &&
+    isRecibidoPositive;
 
   const remainingInPayCurrency =
     chargeCurrency === payCurrency
@@ -316,6 +328,11 @@ export default function Pagos() {
   const createPayment = useMutation({
     mutationFn: async () => {
       if (!selectedCharge) throw new Error("NO_CHARGE");
+      if (!form.student_id) throw new Error("NO_STUDENT");
+      if (!["USD", "NIO"].includes(payCurrency)) throw new Error("MONEDA_INVALIDA");
+      if (!isRecibidoFormatValid || !isRecibidoDigitsValid || !isRecibidoPositive) {
+        throw new Error("LIMITE_RECIBIDO");
+      }
 
       const paidAt = new Date().toISOString();
       const safeRate = dynamicRate > 0 ? dynamicRate : RATE_USD_TO_NIO;
@@ -454,8 +471,24 @@ export default function Pagos() {
         toast.error("El monto recibido no es válido.");
         return;
       }
+      if (err.message === "LIMITE_RECIBIDO") {
+        toast.error(
+          payCurrency === "USD"
+            ? "En USD, el campo Recibido acepta máximo 3 cifras (hasta 999.99)."
+            : "En C$, el campo Recibido acepta máximo 4 cifras (hasta 9999.99)."
+        );
+        return;
+      }
       if (err.message === "YA_PAGADO") {
         toast.error("Esta mensualidad ya está pagada y no se puede cobrar de nuevo.");
+        return;
+      }
+      if (err.message === "NO_STUDENT") {
+        toast.error("Debes seleccionar un estudiante.");
+        return;
+      }
+      if (err.message === "MONEDA_INVALIDA") {
+        toast.error("Moneda de pago inválida.");
         return;
       }
 
@@ -665,9 +698,15 @@ export default function Pagos() {
                             onChange={(e) => {
                               const raw = e.target.value.replace(",", ".");
                               if (!/^\d*\.?\d{0,2}$/.test(raw)) return;
+                              const [intPart = ""] = raw.split(".");
+                              const maxDigits = payCurrency === "USD" ? 3 : 4;
+                              if (intPart.length > maxDigits) return;
                               setForm({ ...form, recibido: raw });
                             }}
                           />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Máximo {payCurrency === "USD" ? "3" : "4"} cifras ({payCurrency === "USD" ? "999.99" : "9999.99"}).
+                          </p>
                         </div>
                       </div>
 
@@ -701,7 +740,7 @@ export default function Pagos() {
                         className="w-full"
                         disabled={
                           !form.charge_id ||
-                          recibidoNum <= 0 ||
+                          !isRecibidoValid ||
                           createPayment.isPending
                         }
                         onClick={() => createPayment.mutate()}

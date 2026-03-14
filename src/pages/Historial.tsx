@@ -236,7 +236,18 @@ export default function Historial() {
 
       const chargeCurrency = latestCharge?.currency ?? "NIO";
       const totalCharge = Number(latestCharge?.amount || 0);
-      const paidInChargeCurrency = Number(latestCharge?.paid_amount || 0);
+      const paidNio = monthPayments
+        .filter((p) => (p.currency ?? "NIO") === "NIO")
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      const paidUsd = monthPayments
+        .filter((p) => (p.currency ?? "NIO") === "USD")
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+      const paidInChargeCurrency =
+        chargeCurrency === "USD"
+          ? paidUsd + paidNio / RATE_USD_TO_NIO
+          : paidNio + paidUsd * RATE_USD_TO_NIO;
+
       const saldoChargeCurrency = Math.max(totalCharge - paidInChargeCurrency, 0);
 
       const totalChargeNio =
@@ -253,13 +264,6 @@ export default function Historial() {
             : totalCharge / RATE_USD_TO_NIO
           : 0;
 
-      const paidNio = monthPayments
-        .filter((p) => (p.currency ?? "NIO") === "NIO")
-        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
-      const paidUsd = monthPayments
-        .filter((p) => (p.currency ?? "NIO") === "USD")
-        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
-
       const changeNio = monthPayments
         .filter((p) => (p.currency ?? "NIO") === "NIO")
         .reduce((sum, p) => sum + Number(p.change_amount || 0), 0);
@@ -268,10 +272,10 @@ export default function Historial() {
         .reduce((sum, p) => sum + Number(p.change_amount || 0), 0);
 
       let status = "Sin cargo";
-      if (monthCharges.length > 0 && saldoChargeCurrency <= 0) status = "Pagado";
+      if (monthCharges.length > 0 && saldoChargeCurrency <= 0.01) status = "Pagado";
       else if (
         monthCharges.length > 0 &&
-        (paidInChargeCurrency > 0 || monthPayments.length > 0)
+        (paidInChargeCurrency > 0.01 || monthPayments.length > 0)
       )
         status = "Parcial";
       else if (monthCharges.length > 0) status = "Pendiente";
@@ -297,8 +301,13 @@ export default function Historial() {
     return monthlyRows.reduce(
       (acc, row) => {
         if (row.status !== "Pendiente" && row.status !== "Parcial") return acc;
-        if (row.chargeCurrency === "USD") acc.usd += row.saldoChargeCurrency;
-        else acc.nio += row.saldoChargeCurrency;
+        if (row.chargeCurrency === "USD") {
+          acc.usd += row.saldoChargeCurrency;
+          acc.nio += row.saldoChargeCurrency * RATE_USD_TO_NIO;
+        } else {
+          acc.nio += row.saldoChargeCurrency;
+          acc.usd += row.saldoChargeCurrency / RATE_USD_TO_NIO;
+        }
         return acc;
       },
       { nio: 0, usd: 0 }

@@ -318,28 +318,80 @@ export default function Pagos() {
       if (!selectedCharge) throw new Error("NO_CHARGE");
 
       const paidAt = new Date().toISOString();
+      const safeRate = dynamicRate > 0 ? dynamicRate : RATE_USD_TO_NIO;
 
-      if (amountAppliedInPayCurrency <= 0) {
+      // Validación fuerte contra BD para evitar duplicados por mes ya pagado.
+      const { data: freshCharge, error: freshChargeErr } = await supabase
+        .from("charges")
+        .select(`
+          id,
+          student_id,
+          month,
+          amount,
+          paid_amount,
+          currency,
+          status
+        `)
+        .eq("id", selectedCharge.id)
+        .maybeSingle();
+
+      if (freshChargeErr) throw freshChargeErr;
+      if (!freshCharge) throw new Error("CHARGE_NOT_FOUND");
+
+      const freshAmount = Number(freshCharge.amount || 0);
+      const freshPaid = Number(freshCharge.paid_amount || 0);
+      const freshRemainingInChargeCurrency = Math.max(freshAmount - freshPaid, 0);
+
+      if (freshCharge.status === "PAGADO" || freshRemainingInChargeCurrency <= 0.0001) {
+        throw new Error("YA_PAGADO");
+      }
+
+      const freshChargeCurrency = freshCharge.currency ?? "USD";
+
+      const freshRemainingInPayCurrency =
+        freshChargeCurrency === payCurrency
+          ? freshRemainingInChargeCurrency
+          : freshChargeCurrency === "USD" && payCurrency === "NIO"
+            ? freshRemainingInChargeCurrency * safeRate
+            : freshRemainingInChargeCurrency / safeRate;
+
+      const freshAmountAppliedInPayCurrency = Math.min(
+        recibidoNum,
+        Number(freshRemainingInPayCurrency.toFixed(2))
+      );
+
+      if (freshAmountAppliedInPayCurrency <= 0) {
         throw new Error("MONTO_INVALIDO");
       }
 
-      const newPaidAmount =
-        Number(selectedCharge.paid_amount ?? 0) + amountAppliedInChargeCurrency;
+      const freshAmountAppliedInChargeCurrency =
+        freshChargeCurrency === payCurrency
+          ? freshAmountAppliedInPayCurrency
+          : freshChargeCurrency === "USD" && payCurrency === "NIO"
+            ? freshAmountAppliedInPayCurrency / safeRate
+            : freshAmountAppliedInPayCurrency * safeRate;
+
+      const newPaidAmount = freshPaid + freshAmountAppliedInChargeCurrency;
 
       const newStatus =
-        newPaidAmount + 0.0001 >= Number(selectedCharge.amount)
+        newPaidAmount + 0.0001 >= freshAmount
           ? "PAGADO"
           : "PARCIAL";
 
+      const freshCambio =
+        recibidoNum > freshAmountAppliedInPayCurrency
+          ? recibidoNum - freshAmountAppliedInPayCurrency
+          : 0;
+
       const { error: payErr } = await supabase.from("payments").insert({
-        student_id: selectedCharge.student_id,
-        charge_id: selectedCharge.id,
+        student_id: freshCharge.student_id,
+        charge_id: freshCharge.id,
         concept: "MENSUALIDAD",
         academic_year: year,
-        month: selectedCharge.month,
-        amount: Number(amountAppliedInPayCurrency.toFixed(2)),
+        month: freshCharge.month,
+        amount: Number(freshAmountAppliedInPayCurrency.toFixed(2)),
         received_amount: Number(recibidoNum.toFixed(2)),
-        change_amount: Number(cambio.toFixed(2)),
+        change_amount: Number(freshCambio.toFixed(2)),
         currency: payCurrency,
         method: payCurrency === "USD" ? "DOLAR" : "EFECTIVO",
         paid_at: paidAt,
@@ -355,14 +407,20 @@ export default function Pagos() {
           paid_amount: Number(newPaidAmount.toFixed(2)),
           status: newStatus,
         })
-        .eq("id", selectedCharge.id);
+        .eq("id", freshCharge.id);
 
       if (chargeErr) throw chargeErr;
 
-      return { paidAt };
+      return {
+        paidAt,
+        chargeMonth: freshCharge.month,
+        totalInPayCurrency: Number(freshRemainingInPayCurrency.toFixed(2)),
+        appliedInPayCurrency: Number(freshAmountAppliedInPayCurrency.toFixed(2)),
+        cambio: Number(freshCambio.toFixed(2)),
+      };
     },
 
-    onSuccess: async ({ paidAt }) => {
+    onSuccess: async ({ paidAt, chargeMonth, totalInPayCurrency, appliedInPayCurrency, cambio }) => {
       await qc.invalidateQueries({ queryKey: ["payments", year] });
       await qc.invalidateQueries({ queryKey: ["dashboard"] });
 
@@ -374,11 +432,11 @@ export default function Pagos() {
 
       imprimirRecibo({
         estudiante: search,
-        mes: MONTHS[(selectedCharge?.month ?? 1) - 1],
-        total: remainingInPayCurrency.toFixed(2),
-        aplicado: amountAppliedInPayCurrency.toFixed(2),
+        mes: MONTHS[(chargeMonth ?? 1) - 1],
+        total: Number(totalInPayCurrency || 0).toFixed(2),
+        aplicado: Number(appliedInPayCurrency || 0).toFixed(2),
         recibido: recibidoNum.toFixed(2),
-        cambio: cambio.toFixed(2),
+        cambio: Number(cambio || 0).toFixed(2),
         moneda: simboloPago,
         fecha: new Date(paidAt).toLocaleString("es-NI", {
           timeZone: "America/Managua",
@@ -394,6 +452,10 @@ export default function Pagos() {
 
       if (err.message === "MONTO_INVALIDO") {
         toast.error("El monto recibido no es válido.");
+        return;
+      }
+      if (err.message === "YA_PAGADO") {
+        toast.error("Esta mensualidad ya está pagada y no se puede cobrar de nuevo.");
         return;
       }
 

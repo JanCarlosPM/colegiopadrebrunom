@@ -26,6 +26,19 @@ function ReciboOficialTemplate({
   sumaDe = "",
   concepto,
 }: ReciboOficialData) {
+  const pos = {
+    numero: { top: "9.5%", left: "86.2%" },
+    grado: { top: "57.5%", left: "8.5%" }, // 1
+    anio: { top: "57.5%", left: "38.5%" }, // 2
+    nivel: { top: "57.5%", left: "62.5%" }, // 3
+    fecha: { top: "68.5%", left: "8.5%" }, // 4
+    cordobas: { top: "68.5%", left: "75.5%" }, // 5
+    dolares: { top: "76.5%", left: "75.5%" }, // 6
+    recibimosDe: { top: "76.5%", left: "18%" }, // 7
+    sumaDe: { top: "84%", left: "14.5%" }, // 8
+    concepto: { top: "91.5%", left: "18.8%" }, // 9
+  } as const;
+
   return (
     <div
       style={{
@@ -43,8 +56,8 @@ function ReciboOficialTemplate({
       <div
         style={{
           position: "absolute",
-          top: "20.3%",
-          left: "86.2%",
+          top: pos.numero.top,
+          left: pos.numero.left,
           fontSize: 22,
           fontWeight: "bold",
           color: "#c44",
@@ -58,8 +71,8 @@ function ReciboOficialTemplate({
       <div
         style={{
           position: "absolute",
-          top: "38.2%",
-          left: "7.1%",
+          top: pos.grado.top,
+          left: pos.grado.left,
           width: "24%",
           fontSize: 16,
         }}
@@ -71,8 +84,8 @@ function ReciboOficialTemplate({
       <div
         style={{
           position: "absolute",
-          top: "38.2%",
-          left: "36.2%",
+          top: pos.anio.top,
+          left: pos.anio.left,
           width: "18%",
           fontSize: 16,
           textAlign: "center",
@@ -84,8 +97,8 @@ function ReciboOficialTemplate({
       <div
         style={{
           position: "absolute",
-          top: "38.2%",
-          left: "60.8%",
+          top: pos.nivel.top,
+          left: pos.nivel.left,
           width: "30%",
           fontSize: 16,
         }}
@@ -96,8 +109,8 @@ function ReciboOficialTemplate({
       <div
         style={{
           position: "absolute",
-          top: "44.2%",
-          left: "9.3%",
+          top: pos.fecha.top,
+          left: pos.fecha.left,
           width: "42%",
           fontSize: 16,
         }}
@@ -108,8 +121,8 @@ function ReciboOficialTemplate({
       <div
         style={{
           position: "absolute",
-          top: "44.2%",
-          left: "75.8%",
+          top: pos.cordobas.top,
+          left: pos.cordobas.left,
           width: "18%",
           fontSize: 16,
           textAlign: "left",
@@ -121,8 +134,8 @@ function ReciboOficialTemplate({
       <div
         style={{
           position: "absolute",
-          top: "50.4%",
-          left: "75.8%",
+          top: pos.dolares.top,
+          left: pos.dolares.left,
           width: "18%",
           fontSize: 16,
           textAlign: "left",
@@ -135,8 +148,8 @@ function ReciboOficialTemplate({
       <div
         style={{
           position: "absolute",
-          top: "57.6%",
-          left: "17.4%",
+          top: pos.recibimosDe.top,
+          left: pos.recibimosDe.left,
           width: "73%",
           fontSize: 16,
         }}
@@ -148,8 +161,8 @@ function ReciboOficialTemplate({
       <div
         style={{
           position: "absolute",
-          top: "63.8%",
-          left: "14.5%",
+          top: pos.sumaDe.top,
+          left: pos.sumaDe.left,
           width: "76%",
           fontSize: 16,
         }}
@@ -161,8 +174,8 @@ function ReciboOficialTemplate({
       <div
         style={{
           position: "absolute",
-          top: "70.1%",
-          left: "18.8%",
+          top: pos.concepto.top,
+          left: pos.concepto.left,
           width: "70%",
           fontSize: 16,
         }}

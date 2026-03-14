@@ -52,6 +52,7 @@ const fetchData = async (year: number) => {
     .from("students")
     .select(`
       id,
+      grade_id,
       full_name,
       grades ( name ),
       sections ( name ),
@@ -205,6 +206,77 @@ export default function Matriculas() {
       let cambioPago = 0;
       let statusPago = "PENDIENTE";
 
+      const ensureMonthlyCharges = async () => {
+        const gradeId = selectedStudent?.grade_id;
+        if (!gradeId) return;
+
+        const { data: priceRow } = await supabase
+          .from("grade_prices")
+          .select("*")
+          .eq("grade_id", gradeId)
+          .maybeSingle();
+
+        const amountNio = Number(
+          priceRow?.monthly_amount ??
+          priceRow?.amount_nio ??
+          770
+        );
+
+        const amountUsd = Number(
+          priceRow?.monthly_amount_usd ??
+          priceRow?.amount_usd ??
+          21
+        );
+
+        const chargeCurrency: "NIO" | "USD" =
+          priceRow?.currency === "USD" ? "USD" : "NIO";
+
+        const monthlyAmount =
+          chargeCurrency === "USD"
+            ? amountUsd || 21
+            : amountNio || 770;
+
+        const { data: existingCharges, error: existingChargesError } = await supabase
+          .from("charges")
+          .select("month")
+          .eq("student_id", selectedStudent.id)
+          .eq("academic_year", year)
+          .eq("concept", "MENSUALIDAD");
+
+        if (existingChargesError) throw existingChargesError;
+
+        const existingMonths = new Set(
+          (existingCharges ?? [])
+            .map((c: any) => Number(c.month))
+            .filter((m: number) => m >= 1 && m <= 12)
+        );
+
+        const missingMonths = Array.from({ length: 12 }, (_, i) => i + 1).filter(
+          (m) => !existingMonths.has(m)
+        );
+
+        if (missingMonths.length === 0) return;
+
+        const rows = missingMonths.map((month) => ({
+          student_id: selectedStudent.id,
+          academic_year: year,
+          grade_id: gradeId,
+          concept: "MENSUALIDAD",
+          month,
+          due_date: `${year}-${String(month).padStart(2, "0")}-10`,
+          amount: monthlyAmount,
+          currency: chargeCurrency,
+          status: "PENDIENTE",
+          paid_amount: 0,
+        }));
+
+        const { error: insertChargesError } = await supabase
+          .from("charges")
+          .insert(rows);
+
+        if (insertChargesError) throw insertChargesError;
+      };
+
       if (!existing) {
         const totalOriginal = Number(total);
         montoAplicado = Math.min(paid, totalOriginal);
@@ -226,6 +298,7 @@ export default function Matriculas() {
           });
 
         if (insertEnrollmentError) throw insertEnrollmentError;
+        await ensureMonthlyCharges();
       } else {
         const totalOriginal = Number(existing.total_amount);
         const alreadyPaid = Number(existing.paid_amount);
@@ -255,6 +328,7 @@ export default function Matriculas() {
           .eq("id", existing.id);
 
         if (updateEnrollmentError) throw updateEnrollmentError;
+        await ensureMonthlyCharges();
       }
 
       const { error: paymentError } = await supabase.from("payments").insert({

@@ -64,6 +64,14 @@ This project is built with:
 
 Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
 
+### 404 al refrescar en una ruta (ej. /estudiantes, /dashboard)
+
+Esta app es una SPA: todas las rutas deben devolver `index.html` para que React Router funcione. Si al refrescar ves "404 NOT_FOUND", el servidor no está haciendo ese “fallback”.
+
+- **Vercel**: el proyecto incluye `vercel.json` con rewrites; no deberías tener que hacer nada.
+- **Netlify**: se incluye `public/_redirects` (se copia a `dist`); con “Publish directory: dist” debería funcionar.
+- **Lovable / otro host**: en la configuración de despliegue debe haber una opción tipo “Rewrite all routes to index.html” o “SPA fallback”. Actívala para que cualquier ruta no encontrada sirva `index.html`.
+
 ## Can I connect a custom domain to my Lovable project?
 
 Yes, you can!

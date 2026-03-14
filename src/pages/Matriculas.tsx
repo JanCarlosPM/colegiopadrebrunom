@@ -68,6 +68,10 @@ type MatriculaPaymentRow = {
   } | null;
 };
 
+const EMPTY_ENROLLMENTS: EnrollmentRow[] = [];
+const EMPTY_STUDENTS: StudentRow[] = [];
+const EMPTY_PAYMENTS: MatriculaPaymentRow[] = [];
+
 /* ================= FETCH ================= */
 
 const fetchData = async (year: number) => {
@@ -178,9 +182,9 @@ export default function Matriculas() {
 
   const [saldoPendiente, setSaldoPendiente] = useState(0);
 
-  const enrollments = data?.enrollments ?? [];
-  const students = data?.students ?? [];
-  const payments = data?.payments ?? [];
+  const enrollments = data?.enrollments ?? EMPTY_ENROLLMENTS;
+  const students = data?.students ?? EMPTY_STUDENTS;
+  const payments = data?.payments ?? EMPTY_PAYMENTS;
 
   /* ================= STATE ================= */
 

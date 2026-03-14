@@ -49,9 +49,72 @@ const REPORT_TYPES: { value: string; label: string; category: keyof typeof REPOR
   { value: "pendientes", label: "Sin matrícula", category: "morosidad" },
 ];
 
+type StudentReportRow = {
+  id: string;
+  full_name: string;
+  status?: string | null;
+  guardians?: { full_name?: string | null; phone?: string | null } | null;
+  grades?: { name?: string | null } | null;
+  sections?: { name?: string | null } | null;
+};
+
+type EnrollmentReportRow = {
+  id: string;
+  student_id: string;
+  academic_year?: number | null;
+  total_amount?: number | null;
+  paid_amount?: number | null;
+  currency?: string | null;
+  status?: string | null;
+  enrolled_at?: string | null;
+};
+
+type ChargeReportRow = {
+  id: string;
+  student_id: string;
+  academic_year?: number | null;
+  concept?: string | null;
+  month?: number | null;
+  amount?: number | null;
+  paid_amount?: number | null;
+  currency?: string | null;
+  status?: string | null;
+  due_date?: string | null;
+  created_at?: string | null;
+};
+
+type PaymentReportRow = {
+  id: string;
+  student_id: string;
+  charge_id?: string | null;
+  concept?: string | null;
+  academic_year?: number | null;
+  month?: number | null;
+  amount?: number | null;
+  received_amount?: number | null;
+  change_amount?: number | null;
+  currency?: string | null;
+  method?: string | null;
+  status?: string | null;
+  paid_at?: string | null;
+  created_at?: string | null;
+};
+
+type ReportRow = Record<string, string | number | null | undefined>;
+
+const EMPTY_STUDENTS: StudentReportRow[] = [];
+const EMPTY_ENROLLMENTS: EnrollmentReportRow[] = [];
+const EMPTY_CHARGES: ChargeReportRow[] = [];
+const EMPTY_PAYMENTS: PaymentReportRow[] = [];
+
 /* ================= FETCH ================= */
 
-const fetchReportData = async () => {
+const fetchReportData = async (): Promise<{
+  students: StudentReportRow[];
+  enrollments: EnrollmentReportRow[];
+  charges: ChargeReportRow[];
+  payments: PaymentReportRow[];
+}> => {
   const [studentsRes, enrollmentsRes, chargesRes, paymentsRes] = await Promise.all([
     supabase.from("students").select(`
       id,
@@ -108,10 +171,10 @@ const fetchReportData = async () => {
   if (paymentsRes.error) throw paymentsRes.error;
 
   return {
-    students: studentsRes.data ?? [],
-    enrollments: enrollmentsRes.data ?? [],
-    charges: chargesRes.data ?? [],
-    payments: paymentsRes.data ?? [],
+    students: (studentsRes.data ?? []) as StudentReportRow[],
+    enrollments: (enrollmentsRes.data ?? []) as EnrollmentReportRow[],
+    charges: (chargesRes.data ?? []) as ChargeReportRow[],
+    payments: (paymentsRes.data ?? []) as PaymentReportRow[],
   };
 };
 
@@ -123,10 +186,10 @@ export default function Reportes() {
     queryFn: fetchReportData,
   });
 
-  const students = data?.students ?? [];
-  const enrollments = data?.enrollments ?? [];
-  const charges = data?.charges ?? [];
-  const payments = data?.payments ?? [];
+  const students = data?.students ?? EMPTY_STUDENTS;
+  const enrollments = data?.enrollments ?? EMPTY_ENROLLMENTS;
+  const charges = data?.charges ?? EMPTY_CHARGES;
+  const payments = data?.payments ?? EMPTY_PAYMENTS;
 
   const [tipoReporte, setTipoReporte] = useState("resumen-ejecutivo");
   const [grado, setGrado] = useState("todos");
@@ -142,13 +205,13 @@ export default function Reportes() {
     () =>
       grado === "todos"
         ? students
-        : students.filter((s: { grades?: { name?: string } }) => s.grades?.name === grado),
+        : students.filter((s) => s.grades?.name === grado),
     [students, grado]
   );
 
   const studentsById = useMemo(() => {
-    const map = new Map<string, any>();
-    students.forEach((student: any) => map.set(student.id, student));
+    const map = new Map<string, StudentReportRow>();
+    students.forEach((student) => map.set(student.id, student));
     return map;
   }, [students]);
 
@@ -308,7 +371,7 @@ export default function Reportes() {
       if (year) {
         list = list.filter((p: { academic_year?: number }) => Number(p.academic_year) === year);
       }
-      return list.map((p: any) => {
+      return list.map((p) => {
         const s = studentsById.get(p.student_id);
         return {
           fecha: p.paid_at ? new Date(p.paid_at).toLocaleString("es-NI") : "—",
@@ -334,7 +397,7 @@ export default function Reportes() {
         end.setHours(23, 59, 59, 999);
         list = list.filter((p: { paid_at?: string }) => new Date(p.paid_at || 0) <= end);
       }
-      return list.map((p: any) => {
+      return list.map((p) => {
         const s = studentsById.get(p.student_id);
         return {
           fecha: p.paid_at ? new Date(p.paid_at).toLocaleString("es-NI") : "—",
@@ -348,14 +411,14 @@ export default function Reportes() {
     }
 
     if (tipoReporte === "morosidad-detallada") {
-      const rows: any[] = [];
-      filteredStudents.forEach((s: any) => {
+      const rows: ReportRow[] = [];
+      filteredStudents.forEach((s) => {
         const studentCharges = chargesInYear.filter(
-          (c: any) =>
+          (c) =>
             c.student_id === s.id &&
             (c.status === "PENDIENTE" || c.status === "PARCIAL")
         );
-        studentCharges.forEach((c: any) => {
+        studentCharges.forEach((c) => {
           const total = Number(c.amount || 0);
           const pagado = Number(c.paid_amount || 0);
           const pendiente = total - pagado;
@@ -378,7 +441,7 @@ export default function Reportes() {
     if (tipoReporte === "estudiantes") {
       return filteredStudents
         .filter((s: { status?: string }) => s.status === "ACTIVO")
-        .map((s: any) => ({
+        .map((s) => ({
           nombre: s.full_name,
           grado: s.grades?.name ?? "—",
           seccion: s.sections?.name ?? "—",
@@ -390,8 +453,8 @@ export default function Reportes() {
 
     if (tipoReporte === "matriculas") {
       return filteredStudents
-        .map((s: any) => {
-          const enrollment = enrollmentsInYear.find((e: any) => e.student_id === s.id);
+        .map((s) => {
+          const enrollment = enrollmentsInYear.find((e) => e.student_id === s.id);
           if (!enrollment) return null;
           return {
             nombre: s.full_name,
@@ -407,14 +470,14 @@ export default function Reportes() {
     }
 
     if (tipoReporte === "mensualidades") {
-      const rows: any[] = [];
-      filteredStudents.forEach((s: any) => {
+      const rows: ReportRow[] = [];
+      filteredStudents.forEach((s) => {
         const studentCharges = chargesInYear.filter(
-          (c: any) =>
+          (c) =>
             s.id === c.student_id &&
             (mes === "todos" || Number(c.month) === Number(mes))
         );
-        studentCharges.forEach((c: any) => {
+        studentCharges.forEach((c) => {
           rows.push({
             nombre: s.full_name,
             grado: s.grades?.name ?? "—",
@@ -431,11 +494,11 @@ export default function Reportes() {
     }
 
     if (tipoReporte === "pagos") {
-      const rows: any[] = [];
+      const rows: ReportRow[] = [];
       const filtered = mes === "todos"
         ? paymentsInYear
-        : paymentsInYear.filter((p: any) => p.concept !== "MENSUALIDAD" || Number(p.month) === Number(mes));
-      filtered.forEach((p: any) => {
+        : paymentsInYear.filter((p) => p.concept !== "MENSUALIDAD" || Number(p.month) === Number(mes));
+      filtered.forEach((p) => {
         const s = studentsById.get(p.student_id);
         rows.push({
           nombre: s?.full_name ?? "—",
@@ -454,9 +517,9 @@ export default function Reportes() {
 
     if (tipoReporte === "solventes") {
       return filteredStudents
-        .map((s: any) => {
-          const studentCharges = chargesInYear.filter((c: any) => c.student_id === s.id);
-          const hasPending = studentCharges.some((c: any) => c.status === "PENDIENTE" || c.status === "PARCIAL");
+        .map((s) => {
+          const studentCharges = chargesInYear.filter((c) => c.student_id === s.id);
+          const hasPending = studentCharges.some((c) => c.status === "PENDIENTE" || c.status === "PARCIAL");
           if (hasPending) return null;
           const hasAny = studentCharges.length > 0;
           if (!hasAny) return null;
@@ -472,13 +535,13 @@ export default function Reportes() {
 
     if (tipoReporte === "morosos") {
       return filteredStudents
-        .map((s: any) => {
-          const studentCharges = chargesInYear.filter((c: any) => c.student_id === s.id);
-          const hasPending = studentCharges.some((c: any) => c.status === "PENDIENTE");
+        .map((s) => {
+          const studentCharges = chargesInYear.filter((c) => c.student_id === s.id);
+          const hasPending = studentCharges.some((c) => c.status === "PENDIENTE");
           if (!hasPending) return null;
           const pendingNio = studentCharges
-            .filter((c: any) => c.status === "PENDIENTE" || c.status === "PARCIAL")
-            .reduce((sum: number, c: any) => {
+            .filter((c) => c.status === "PENDIENTE" || c.status === "PARCIAL")
+            .reduce((sum: number, c) => {
               const pending = Math.max(Number(c.amount || 0) - Number(c.paid_amount || 0), 0);
               return normalizeCurrency(c.currency) === "USD" ? sum + convertCurrency(pending, "USD", "NIO") : sum + pending;
             }, 0);
@@ -495,12 +558,12 @@ export default function Reportes() {
 
     if (tipoReporte === "parciales") {
       return filteredStudents
-        .map((s: any) => {
+        .map((s) => {
           const enrollment = enrollmentsInYear.find(
-            (e: any) => e.student_id === s.id && e.status === "PARCIAL"
+            (e) => e.student_id === s.id && e.status === "PARCIAL"
           );
           const chargeParcial = chargesInYear.some(
-            (c: any) => c.student_id === s.id && c.status === "PARCIAL"
+            (c) => c.student_id === s.id && c.status === "PARCIAL"
           );
           if (!enrollment && !chargeParcial) return null;
           return {
@@ -515,8 +578,8 @@ export default function Reportes() {
 
     if (tipoReporte === "pendientes") {
       return filteredStudents
-        .map((s: any) => {
-          const enrollment = enrollmentsInYear.find((e: any) => e.student_id === s.id);
+        .map((s) => {
+          const enrollment = enrollmentsInYear.find((e) => e.student_id === s.id);
           if (enrollment) return null;
           return {
             nombre: s.full_name,
@@ -559,7 +622,7 @@ export default function Reportes() {
       const XLSX = await import("xlsx");
       const sheetData =
         Array.isArray(reportData) && reportData.length > 0 && typeof reportData[0] === "object"
-          ? reportData.map((r: any) => {
+          ? reportData.map((r) => {
               const obj = { ...r };
               if ("total_nio" in obj) delete obj.total_nio;
               if ("total_usd" in obj) delete obj.total_usd;
@@ -596,7 +659,7 @@ export default function Reportes() {
       doc.text(`Año: ${anio}  |  Generado: ${new Date().toLocaleDateString("es-NI")}`, 14, 22);
 
       const headers = reportData.length > 0 ? Object.keys(reportData[0]).filter((k) => !k.startsWith("total_")) : [];
-      const body = (reportData as any[]).map((r) => headers.map((h) => (r[h] != null ? String(r[h]) : "—")));
+      const body = (reportData as ReportRow[]).map((r) => headers.map((h) => (r[h] != null ? String(r[h]) : "—")));
 
       autoTable(doc, {
         head: [headers],
@@ -615,7 +678,7 @@ export default function Reportes() {
   };
 
   const gradeOptions = useMemo(
-    () => [...new Set(students.map((s: any) => s.grades?.name).filter(Boolean))],
+    () => [...new Set(students.map((s) => s.grades?.name).filter(Boolean))],
     [students]
   );
 
@@ -690,7 +753,7 @@ export default function Reportes() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos</SelectItem>
-                  {gradeOptions.map((g: string) => (
+                  {gradeOptions.map((g) => (
                     <SelectItem key={g} value={g}>
                       {g}
                     </SelectItem>
@@ -782,7 +845,7 @@ export default function Reportes() {
                 </tr>
               </thead>
               <tbody>
-                {(reportData as any[]).map((row: any, i: number) => (
+                {(reportData as ReportRow[]).map((row, i: number) => (
                   <tr key={i} className="border-b hover:bg-muted/30">
                     {Object.entries(row)
                       .filter(([k]) => !k.startsWith("total_"))

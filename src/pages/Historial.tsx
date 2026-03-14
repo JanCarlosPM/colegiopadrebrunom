@@ -14,6 +14,39 @@ import {
 } from "@/lib/billing";
 import { StatusBadge } from "@/components/common/StatusBadge";
 
+type StudentRow = {
+  id: string;
+  full_name: string;
+  guardians?: { full_name?: string | null; phone?: string | null } | null;
+  grades?: { name?: string | null } | null;
+  sections?: { name?: string | null } | null;
+};
+
+type EnrollmentRow = {
+  total_amount?: number | null;
+  paid_amount?: number | null;
+  currency?: string | null;
+  status?: string | null;
+};
+
+type PaymentRow = {
+  id: string;
+  month?: number | null;
+  amount?: number | null;
+  change_amount?: number | null;
+  currency?: string | null;
+  paid_at?: string | null;
+};
+
+type ChargeRow = {
+  id: string;
+  month?: number | null;
+  amount?: number | null;
+  currency?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+};
+
 /* =========================
    CONSTANTE MESES
 ========================= */
@@ -23,15 +56,15 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 ========================= */
 
 export default function Historial() {
-  const [students, setStudents] = useState<any[]>([]);
-  const [selectedStudent, setSelectedStudent] = useState<any>(null);
+  const [students, setStudents] = useState<StudentRow[]>([]);
+  const [selectedStudent, setSelectedStudent] = useState<StudentRow | null>(null);
   const [search, setSearch] = useState("");
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  const [enrollment, setEnrollment] = useState<any>(null);
-  const [payments, setPayments] = useState<any[]>([]);
-  const [charges, setCharges] = useState<any[]>([]);
+  const [enrollment, setEnrollment] = useState<EnrollmentRow | null>(null);
+  const [payments, setPayments] = useState<PaymentRow[]>([]);
+  const [charges, setCharges] = useState<ChargeRow[]>([]);
 
   const [year, setYear] = useState(new Date().getFullYear());
 

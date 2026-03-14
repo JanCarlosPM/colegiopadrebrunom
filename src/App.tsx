@@ -23,12 +23,20 @@ const Configuracion = lazy(() => import("./pages/Configuracion"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
+type AuthErrorLike = {
+  message?: string;
+  details?: string;
+  code?: string;
+  status?: number;
+};
+
 const isJwtExpiredError = (error: unknown) => {
-  const raw = String((error as any)?.message || (error as any)?.details || "").toLowerCase();
+  const err = (error ?? {}) as AuthErrorLike;
+  const raw = String(err.message || err.details || "").toLowerCase();
   return (
     raw.includes("jwt expired") ||
-    (error as any)?.code === "PGRST301" ||
-    (error as any)?.status === 401
+    err.code === "PGRST301" ||
+    err.status === 401
   );
 };
 

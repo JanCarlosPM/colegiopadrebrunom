@@ -76,6 +76,10 @@ type GradePriceRow = {
   currency?: string | null;
 };
 type AppUserRow = { id: string; email: string; full_name: string | null; role: string; is_active: boolean };
+type LegacySettingsRow = SettingsRow & {
+  alerts_morosidad?: boolean | null;
+  reminders_pago?: boolean | null;
+};
 
 const DEFAULT_MONTHLY_NIO = 770;
 const DEFAULT_MONTHLY_USD = 21;
@@ -179,6 +183,7 @@ const Configuracion = () => {
 
   useEffect(() => {
     if (settings) {
+      const legacySettings = settings as LegacySettingsRow;
       setGeneralForm({
         ...settings,
         school_name: settings.school_name ?? "Colegio Padre Bruno Martínez",
@@ -187,8 +192,8 @@ const Configuracion = () => {
         email: settings.email ?? "",
         current_academic_year: settings.current_academic_year ?? new Date().getFullYear(),
         enrollments_open: settings.enrollments_open ?? true,
-        alertas_morosidad: (settings as any).alertas_morosidad ?? (settings as any).alerts_morosidad ?? true,
-        recordatorios_pago: (settings as any).recordatorios_pago ?? (settings as any).reminders_pago ?? true,
+        alertas_morosidad: settings.alertas_morosidad ?? legacySettings.alerts_morosidad ?? true,
+        recordatorios_pago: settings.recordatorios_pago ?? legacySettings.reminders_pago ?? true,
         reportes_semanales: settings.reportes_semanales ?? false,
         logo_url: settings.logo_url ?? null,
       });

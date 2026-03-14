@@ -8,6 +8,21 @@ const MONTHS = [
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ];
 
+type RecentPayment = {
+  id: string;
+  amount: number;
+  currency: "NIO" | "USD";
+  concept: string;
+  method?: string | null;
+  month?: number | null;
+  paid_at: string;
+  students?: {
+    full_name?: string | null;
+    grades?: { name?: string | null } | null;
+    sections?: { name?: string | null } | null;
+  } | null;
+};
+
 function formatNicaraguaTime(dateString: string) {
   const date = new Date(dateString);
 
@@ -25,13 +40,13 @@ function capitalize(text: string) {
   return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
 }
 
-function getMethodLabel(payment: any) {
+function getMethodLabel(payment: RecentPayment) {
   if (payment.currency === "USD") return "DOLAR";
   if (payment.currency === "NIO") return "EFECTIVO";
   return payment.method || "PAGO";
 }
 
-function getDescription(payment: any) {
+function getDescription(payment: RecentPayment) {
   const grade = payment.students?.grades?.name ?? "";
   const section = payment.students?.sections?.name ?? "";
 
@@ -72,7 +87,7 @@ export function RecentPayments() {
 
       if (error) throw error;
 
-      return data ?? [];
+      return (data ?? []) as RecentPayment[];
     },
   });
 
@@ -99,7 +114,7 @@ export function RecentPayments() {
             No hay pagos registrados.
           </p>
         ) : (
-          data.map((payment: any) => {
+          data.map((payment) => {
             const initials = payment.students?.full_name
               ?.split(" ")
               .map((n: string) => n[0])

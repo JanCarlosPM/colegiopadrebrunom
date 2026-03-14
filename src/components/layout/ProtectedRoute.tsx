@@ -1,5 +1,6 @@
 import { Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 
 interface Props {
@@ -8,10 +9,10 @@ interface Props {
 
 export default function ProtectedRoute({ children }: Props) {
   const [loading, setLoading] = useState(true);
-  const [session, setSession] = useState<any>(null);
+  const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
-    const isExpired = (s: any) => {
+    const isExpired = (s: Session | null) => {
       const expiresAt = Number(s?.expires_at ?? 0);
       if (!expiresAt) return false;
       // margen de seguridad de 10 segundos

@@ -13,6 +13,30 @@ import { supabase } from "@/lib/supabase";
 import { useQuery } from "@tanstack/react-query";
 import { MONTHS_ES } from "@/lib/billing";
 
+type EnrollmentRow = {
+  student_id: string;
+  total_amount?: number | null;
+  paid_amount?: number | null;
+  status?: string | null;
+};
+
+type MonthlyChargeRow = {
+  student_id: string;
+  amount?: number | null;
+  currency?: string | null;
+  month?: number | null;
+  status?: string | null;
+};
+
+type PaymentRow = {
+  student_id: string;
+  amount?: number | null;
+  concept?: string | null;
+  currency?: string | null;
+  month?: number | null;
+  paid_at?: string | null;
+};
+
 const Dashboard = () => {
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -71,22 +95,26 @@ const Dashboard = () => {
       if (allMonthlyChargesError) throw allMonthlyChargesError;
       if (allPaymentsError) throw allPaymentsError;
 
-      const matriculados = enrollments?.length ?? 0;
+      const enrollmentRows = (enrollments ?? []) as EnrollmentRow[];
+      const monthlyPaymentRows = (monthlyPayments ?? []) as PaymentRow[];
+      const monthlyChargeRows = (allMonthlyCharges ?? []) as MonthlyChargeRow[];
+      const allPaymentRows = (allPayments ?? []) as PaymentRow[];
+      const matriculados = enrollmentRows.length;
 
       // ===== SOLVENTES / PENDIENTES DEL MES (fuente única: charges) =====
-      const currentMonthCharges = (allMonthlyCharges ?? []).filter(
-        (c: any) => Number(c.month) === currentMonthNumber
+      const currentMonthCharges = monthlyChargeRows.filter(
+        (c) => Number(c.month) === currentMonthNumber
       );
       const solventes = new Set(
         currentMonthCharges
-          .filter((c: any) => c.status === "PAGADO")
-          .map((c: any) => c.student_id)
+          .filter((c) => c.status === "PAGADO")
+          .map((c) => c.student_id)
           .filter(Boolean)
       ).size;
       const pendientes = new Set(
         currentMonthCharges
-          .filter((c: any) => c.status === "PENDIENTE" || c.status === "PARCIAL")
-          .map((c: any) => c.student_id)
+          .filter((c) => c.status === "PENDIENTE" || c.status === "PARCIAL")
+          .map((c) => c.student_id)
           .filter(Boolean)
       ).size;
 
@@ -95,48 +123,40 @@ const Dashboard = () => {
 
       // ===== PENDIENTE TOTAL MENSUALIDADES =====
       const pendienteTotalMensualidades = new Set(
-        (allMonthlyCharges ?? [])
-          .filter((c: any) => c.status === "PENDIENTE" || c.status === "PARCIAL")
-          .map((c: any) => c.student_id)
+        monthlyChargeRows
+          .filter((c) => c.status === "PENDIENTE" || c.status === "PARCIAL")
+          .map((c) => c.student_id)
           .filter(Boolean)
       ).size;
 
       // ===== PARCIALES =====
       const matriculaParcial =
-        enrollments?.filter((e: any) => e.status === "PARCIAL").length ?? 0;
+        enrollmentRows.filter((e) => e.status === "PARCIAL").length;
 
       const mensualidadParcial =
-        (allMonthlyCharges ?? []).filter((c: any) => c.status === "PARCIAL").length ?? 0;
+        monthlyChargeRows.filter((c) => c.status === "PARCIAL").length;
 
       // ===== INGRESOS MATRÍCULAS =====
       const matriculasNIO =
-        allPayments
-          ?.filter(
-            (p: any) =>
-              p.concept === "MATRICULA" &&
-              p.currency === "NIO"
-          )
-          .reduce((acc: number, p: any) => acc + Number(p.amount || 0), 0) ?? 0;
+        allPaymentRows
+          .filter((p) => p.concept === "MATRICULA" && p.currency === "NIO")
+          .reduce((acc: number, p) => acc + Number(p.amount || 0), 0);
 
       const matriculasUSD =
-        allPayments
-          ?.filter(
-            (p: any) =>
-              p.concept === "MATRICULA" &&
-              p.currency === "USD"
-          )
-          .reduce((acc: number, p: any) => acc + Number(p.amount || 0), 0) ?? 0;
+        allPaymentRows
+          .filter((p) => p.concept === "MATRICULA" && p.currency === "USD")
+          .reduce((acc: number, p) => acc + Number(p.amount || 0), 0);
 
       // ===== INGRESOS MENSUALIDADES DEL MES =====
       const mensualidadesNIO =
-        monthlyPayments
-          ?.filter((p: any) => p.currency === "NIO")
-          .reduce((acc: number, p: any) => acc + Number(p.amount || 0), 0) ?? 0;
+        monthlyPaymentRows
+          .filter((p) => p.currency === "NIO")
+          .reduce((acc: number, p) => acc + Number(p.amount || 0), 0);
 
       const mensualidadesUSD =
-        monthlyPayments
-          ?.filter((p: any) => p.currency === "USD")
-          .reduce((acc: number, p: any) => acc + Number(p.amount || 0), 0) ?? 0;
+        monthlyPaymentRows
+          .filter((p) => p.currency === "USD")
+          .reduce((acc: number, p) => acc + Number(p.amount || 0), 0);
 
       return {
         totalStudents: totalStudents ?? 0,

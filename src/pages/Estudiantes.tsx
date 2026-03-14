@@ -30,11 +30,57 @@ import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+type GuardianRow = { id: string; full_name: string | null; phone: string | null };
+type GradeRow = { id: string; name: string };
+type SectionRow = { id: string; name: string };
+type EnrollmentYearRow = { academic_year: number };
+
+type StudentRow = {
+  id: string;
+  full_name: string;
+  status: "ACTIVO" | "INACTIVO";
+  created_at: string | null;
+  guardians?: GuardianRow | null;
+  grades?: GradeRow | null;
+  sections?: SectionRow | null;
+  enrollments?: EnrollmentYearRow[] | null;
+};
+
+type StudentListItem = {
+  id: string;
+  nombre: string;
+  estado: "ACTIVO" | "INACTIVO";
+  grado: string;
+  grade_id: string;
+  seccion: string;
+  section_id: string | null;
+  tutor: string;
+  telefono: string;
+  guardian_id: string | null;
+  years: string[];
+  created_at: string | null;
+  fechaCreacion: string;
+  anioCreacion: string;
+};
+
+type StudentFormState = {
+  id: string | null;
+  full_name: string;
+  guardian_id: string | null;
+  guardian_name: string;
+  guardian_phone: string;
+  grade_id: string;
+  section_id: string | null;
+  status: "ACTIVO" | "INACTIVO";
+};
+
+type QueryErrorLike = { message?: string; code?: string };
+
 /* =========================
    FETCHERS
 ========================= */
 
-const fetchStudents = async () => {
+const fetchStudents = async (): Promise<StudentRow[]> => {
   const { data, error } = await supabase
     .from("students")
     .select(`
@@ -50,26 +96,26 @@ const fetchStudents = async () => {
     .order("created_at", { ascending: false });
 
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as StudentRow[];
 };
 
-const fetchGrades = async () => {
+const fetchGrades = async (): Promise<GradeRow[]> => {
   const { data, error } = await supabase
     .from("grades")
     .select("id, name")
     .order("sort_order");
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as GradeRow[];
 };
 
-const fetchSectionsByGrade = async (gradeId: string) => {
+const fetchSectionsByGrade = async (gradeId: string): Promise<SectionRow[]> => {
   if (!gradeId) return [];
   const { data, error } = await supabase
     .from("sections")
     .select("id, name")
     .eq("grade_id", gradeId);
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as SectionRow[];
 };
 
 /* =========================
@@ -107,7 +153,7 @@ export default function Estudiantes() {
   const [openEdit, setOpenEdit] = useState(false);
   const [togglingStudentId, setTogglingStudentId] = useState<string | null>(null);
 
-  const emptyForm = {
+  const emptyForm: StudentFormState = {
     id: null,
     full_name: "",
     guardian_id: null,
@@ -118,9 +164,9 @@ export default function Estudiantes() {
     status: "ACTIVO",
   };
 
-  const [form, setForm] = useState<any>(emptyForm);
-  const onChange = (k: string, v: any) =>
-    setForm((p: any) => ({ ...p, [k]: v }));
+  const [form, setForm] = useState<StudentFormState>(emptyForm);
+  const onChange = <K extends keyof StudentFormState>(k: K, v: StudentFormState[K]) =>
+    setForm((p) => ({ ...p, [k]: v }));
 
   /* =========================
      MUTATIONS
@@ -162,8 +208,9 @@ export default function Estudiantes() {
       setSelectedGradeId("");
       toast.success("Estudiante guardado correctamente.");
     },
-    onError: (error: any) => {
-      if (error.code === "23505") {
+    onError: (error: unknown) => {
+      const err = (error ?? {}) as QueryErrorLike;
+      if (err.code === "23505") {
         toast.error("Este estudiante ya está registrado.");
       } else {
         toast.error("Error al guardar estudiante.");
@@ -258,14 +305,14 @@ export default function Estudiantes() {
   ========================= */
 
   const allYears = useMemo(() => {
-    const years = studentsData.flatMap((s: any) =>
-      (s.enrollments || []).map((e: any) => String(e.academic_year))
+    const years = studentsData.flatMap((s) =>
+      (s.enrollments || []).map((e) => String(e.academic_year))
     );
     return [...new Set(years)].sort((a, b) => Number(b) - Number(a));
   }, [studentsData]);
 
-  const students = studentsData
-    .map((s: any) => ({
+  const students: StudentListItem[] = studentsData
+    .map((s) => ({
       id: s.id,
       nombre: s.full_name,
       estado: s.status ?? "ACTIVO",
@@ -276,7 +323,7 @@ export default function Estudiantes() {
       tutor: s.guardians?.full_name ?? "-",
       telefono: s.guardians?.phone ?? "-",
       guardian_id: s.guardians?.id ?? null,
-      years: (s.enrollments || []).map((e: any) => String(e.academic_year)),
+      years: (s.enrollments || []).map((e) => String(e.academic_year)),
       created_at: s.created_at,
       fechaCreacion: s.created_at
         ? new Date(s.created_at).toLocaleDateString("es-NI", {
@@ -287,7 +334,7 @@ export default function Estudiantes() {
         ? String(new Date(s.created_at).getFullYear())
         : "",
     }))
-    .filter((s: any) => {
+    .filter((s) => {
       const matchesSearch = `${s.nombre} ${s.grado} ${s.seccion} ${s.tutor} ${s.telefono} ${s.estado}`
         .toLowerCase()
         .includes(search.toLowerCase());
@@ -307,7 +354,7 @@ export default function Estudiantes() {
       {studentsError && (
         <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 flex items-center justify-between gap-2">
           <span>
-            No se pudieron cargar los estudiantes. {String((studentsErrorDetail as any)?.message || "")}
+            No se pudieron cargar los estudiantes. {String((studentsErrorDetail as QueryErrorLike)?.message || "")}
           </span>
           <Button variant="outline" size="sm" onClick={() => refetchStudents()}>
             Reintentar
@@ -400,7 +447,7 @@ export default function Estudiantes() {
                         <SelectValue placeholder="Grado" />
                       </SelectTrigger>
                       <SelectContent>
-                        {grades.map((g: any) => (
+                        {grades.map((g) => (
                           <SelectItem key={g.id} value={g.id}>
                             {g.name}
                           </SelectItem>
@@ -426,7 +473,7 @@ export default function Estudiantes() {
                         <SelectValue placeholder="Sección (opcional)" />
                       </SelectTrigger>
                       <SelectContent>
-                        {sections.map((s: any) => (
+                        {sections.map((s) => (
                           <SelectItem key={s.id} value={s.id}>
                             {s.name}
                           </SelectItem>
@@ -536,7 +583,7 @@ export default function Estudiantes() {
         </TableHeader>
 
         <TableBody>
-          {students.map((s: any) => (
+          {students.map((s) => (
             <TableRow key={s.id}>
               <TableCell>{s.nombre}</TableCell>
               <TableCell>{s.grado}</TableCell>
@@ -662,7 +709,7 @@ export default function Estudiantes() {
                       <SelectValue placeholder="Grado" />
                     </SelectTrigger>
                     <SelectContent>
-                      {grades.map((g: any) => (
+                      {grades.map((g) => (
                         <SelectItem key={g.id} value={g.id}>
                           {g.name}
                         </SelectItem>
@@ -689,7 +736,7 @@ export default function Estudiantes() {
                       <SelectValue placeholder="Sección (opcional)" />
                     </SelectTrigger>
                     <SelectContent>
-                      {sections.map((s: any) => (
+                      {sections.map((s) => (
                         <SelectItem key={s.id} value={s.id}>
                           {s.name}
                         </SelectItem>

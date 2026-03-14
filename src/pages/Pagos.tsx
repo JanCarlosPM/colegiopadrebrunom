@@ -231,6 +231,17 @@ export default function Pagos() {
     }
   }, [defaultAcademicYear]);
 
+  useEffect(() => {
+    if (!form.student_id || form.charge_id || studentCharges.length === 0) return;
+    const firstCharge = studentCharges[0];
+    setForm((prev: any) => ({
+      ...prev,
+      charge_id: firstCharge.id,
+      pay_currency: normalizeCurrency(firstCharge.currency),
+      recibido: "",
+    }));
+  }, [form.student_id, form.charge_id, studentCharges]);
+
   const resetPaymentForm = () => {
     setForm({
       student_id: "",
@@ -566,28 +577,40 @@ export default function Pagos() {
             <DialogHeader>
               <DialogTitle>Pago de Mensualidad</DialogTitle>
               <DialogDescription>
-                Registra pagos completos o parciales con validación de moneda y saldo.
+                Flujo simple: elige estudiante, confirma el mes y registra el cobro.
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-5 mt-2">
               {/* BÚSQUEDA ESTUDIANTE */}
-              <div>
+              <div className="rounded-lg border p-4 bg-muted/20">
+                <label className="text-base font-semibold block mb-2">
+                  Paso 1: Seleccionar estudiante
+                </label>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Escribe el nombre y toca al estudiante.
+                </p>
                 <label className="text-sm font-medium block mb-2">
                   Estudiante
                 </label>
                 <Input
                   placeholder="Buscar estudiante..."
                   value={search}
+                  className="h-12 text-base"
                   onChange={(e) => setSearch(e.target.value)}
                 />
 
                 {search && (
-                  <div className="border rounded max-h-40 overflow-y-auto mt-2">
+                  <div className="border rounded max-h-48 overflow-y-auto mt-2 bg-background">
+                    {filteredStudents.length === 0 && (
+                      <p className="p-4 text-sm text-muted-foreground">
+                        No se encontraron estudiantes con esa búsqueda.
+                      </p>
+                    )}
                     {filteredStudents.map((s: any) => (
                         <div
                           key={s.id}
-                          className="p-3 hover:bg-muted cursor-pointer border-b last:border-b-0"
+                          className="p-4 hover:bg-muted cursor-pointer border-b last:border-b-0"
                           onClick={async () => {
                             setForm({
                               student_id: s.id,
@@ -599,12 +622,29 @@ export default function Pagos() {
                             await loadStudentOpenCharges(s.id);
                           }}
                         >
-                          <p className="font-medium">{s.full_name}</p>
-                          <p className="text-xs text-muted-foreground">
+                          <p className="font-semibold text-base">{s.full_name}</p>
+                          <p className="text-sm text-muted-foreground">
                             {s.grades?.name ?? "Sin grado"} {s.sections?.name ?? ""}
                           </p>
                         </div>
                       ))}
+                  </div>
+                )}
+
+                {selectedStudent && (
+                  <div className="mt-3 rounded-md border bg-background p-3 flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Seleccionado</p>
+                      <p className="font-semibold">{selectedStudent.full_name}</p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-10"
+                      onClick={resetPaymentForm}
+                    >
+                      Cambiar
+                    </Button>
                   </div>
                 )}
               </div>
@@ -612,7 +652,10 @@ export default function Pagos() {
               {/* CARGO */}
               {form.student_id && (
                 <>
-                  <div>
+                  <div className="rounded-lg border p-4">
+                    <label className="text-base font-semibold block mb-2">
+                      Paso 2: Confirmar mensualidad
+                    </label>
                     <label className="text-sm font-medium block mb-2">
                       Mes pendiente
                     </label>
@@ -623,7 +666,7 @@ export default function Pagos() {
                       </p>
                     ) : (
                       <select
-                        className="w-full border rounded px-3 py-2"
+                        className="w-full border rounded px-3 py-2 h-12 text-base"
                         value={form.charge_id}
                         onChange={(e) =>
                           setForm({
@@ -652,31 +695,33 @@ export default function Pagos() {
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 rounded-lg border p-4 bg-muted/20">
                         <div>
                           <p className="text-xs text-muted-foreground">Total del cargo</p>
-                          <p className="font-semibold">
+                          <p className="font-semibold text-lg">
                             {formatMoney(totalOriginal, chargeCurrency)}
                           </p>
                         </div>
                         <div>
                           <p className="text-xs text-muted-foreground">Abonado</p>
-                          <p className="font-semibold">
+                          <p className="font-semibold text-lg">
                             {formatMoney(paidSoFar, chargeCurrency)}
                           </p>
                         </div>
                         <div>
                           <p className="text-xs text-muted-foreground">Saldo pendiente</p>
-                          <p className="font-semibold">
+                          <p className="font-semibold text-lg">
                             {formatMoney(remainingInPayCurrency, payCurrency)}
                           </p>
                         </div>
                       </div>
 
+                      <div className="rounded-lg border p-4 space-y-4">
+                        <h4 className="text-base font-semibold">Paso 3: Registrar cobro</h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="text-sm font-medium block mb-2">
                             Moneda de pago
                           </label>
                           <select
-                            className="w-full border rounded px-3 py-2"
+                            className="w-full border rounded px-3 py-2 h-12 text-base"
                             value={form.pay_currency}
                             onChange={(e) =>
                               setForm({
@@ -698,6 +743,7 @@ export default function Pagos() {
                           <Input
                             inputMode="decimal"
                             pattern="^[0-9]*([.,][0-9]{0,2})?$"
+                            className="h-12 text-base"
                             value={String(form.recibido ?? "")}
                             onChange={(e) => {
                               const raw = e.target.value.replace(",", ".");
@@ -711,6 +757,43 @@ export default function Pagos() {
                         </FormField>
                       </div>
 
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-11 text-sm"
+                          onClick={() =>
+                            setForm({
+                              ...form,
+                              recibido: Number(remainingInPayCurrency.toFixed(2)).toString(),
+                            })
+                          }
+                        >
+                          Cobrar exacto
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-11 text-sm"
+                          onClick={() =>
+                            setForm({
+                              ...form,
+                              recibido: Number((remainingInPayCurrency / 2).toFixed(2)).toString(),
+                            })
+                          }
+                        >
+                          Cobrar mitad
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="h-11 text-sm"
+                          onClick={() => setForm({ ...form, recibido: "" })}
+                        >
+                          Limpiar
+                        </Button>
+                      </div>
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="text-sm font-medium block mb-2">
@@ -718,6 +801,7 @@ export default function Pagos() {
                           </label>
                           <Input
                             disabled
+                            className="h-12 text-base"
                             value={formatMoney(amountAppliedInPayCurrency, payCurrency)}
                           />
                         </div>
@@ -728,6 +812,7 @@ export default function Pagos() {
                           </label>
                           <Input
                             disabled
+                            className="h-12 text-base"
                             value={formatMoney(cambio, payCurrency)}
                           />
                         </div>
@@ -738,7 +823,7 @@ export default function Pagos() {
                       </div>
 
                       <Button
-                        className="w-full"
+                        className="w-full h-12 text-base font-semibold"
                         disabled={
                           !form.charge_id ||
                           !isRecibidoValid ||
@@ -748,6 +833,7 @@ export default function Pagos() {
                       >
                         {createPayment.isPending ? "Registrando..." : "Registrar Pago"}
                       </Button>
+                      </div>
                     </>
                   )}
                 </>

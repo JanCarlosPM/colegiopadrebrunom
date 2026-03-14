@@ -429,7 +429,7 @@ export default function Matriculas() {
       <div className="flex justify-end mb-6">
         <Dialog open={openAdd} onOpenChange={setOpenAdd}>
           <DialogTrigger asChild>
-            <Button>
+            <Button className="h-11 text-base">
               <Plus className="mr-2 h-4 w-4" />
               Registrar Matrícula
             </Button>
@@ -439,67 +439,100 @@ export default function Matriculas() {
             <DialogHeader>
               <DialogTitle>Pago de Matrícula</DialogTitle>
               <DialogDescription>
-                Selecciona estudiante, monto recibido y moneda para registrar su matrícula.
+                Flujo simple: elige estudiante, confirma moneda y registra el pago.
               </DialogDescription>
             </DialogHeader>
 
             {/* ESTUDIANTE */}
-            <label className="text-sm font-medium">Estudiante</label>
-            <Input
-              placeholder="Buscar estudiante..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+            <div className="rounded-lg border p-4 bg-muted/20">
+              <label className="text-base font-semibold block mb-2">Paso 1: Seleccionar estudiante</label>
+              <p className="text-sm text-muted-foreground mb-3">Escribe el nombre y selecciona una opción.</p>
+              <label className="text-sm font-medium">Estudiante</label>
+              <Input
+                placeholder="Buscar estudiante..."
+                className="h-12 text-base mt-2"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
 
-            {search && (
-              <div className="border rounded max-h-40 overflow-y-auto">
-                {filteredStudents.map((s: any) => (
-                  <div
-                    key={s.id}
-                    className="p-2 hover:bg-muted cursor-pointer flex gap-2"
-                    onClick={async () => {
-                      const { data: existing } = await supabase
-                        .from("enrollments")
-                        .select("*")
-                        .eq("student_id", s.id)
-                        .eq("academic_year", year)
-                        .maybeSingle();
+              {search && (
+                <div className="border rounded max-h-48 overflow-y-auto mt-2 bg-background">
+                  {filteredStudents.length === 0 && (
+                    <p className="p-4 text-sm text-muted-foreground">
+                      No se encontraron estudiantes con esa búsqueda.
+                    </p>
+                  )}
+                  {filteredStudents.map((s: any) => (
+                    <div
+                      key={s.id}
+                      className="p-4 hover:bg-muted cursor-pointer flex gap-2 border-b last:border-b-0"
+                      onClick={async () => {
+                        const { data: existing } = await supabase
+                          .from("enrollments")
+                          .select("*")
+                          .eq("student_id", s.id)
+                          .eq("academic_year", year)
+                          .maybeSingle();
 
-                      if (existing) {
-                        const totalOriginal = Number(existing.total_amount);
-                        const alreadyPaid = Number(existing.paid_amount);
-                        const restante = totalOriginal - alreadyPaid;
+                        if (existing) {
+                          const totalOriginal = Number(existing.total_amount);
+                          const alreadyPaid = Number(existing.paid_amount);
+                          const restante = totalOriginal - alreadyPaid;
 
-                        setTotal(totalOriginal);
-                        setSaldoPendiente(Math.max(restante, 0));
-                        setCurrency(normalizeCurrency(existing.currency));
-                      } else {
-                        const base =
-                          currency === "USD"
-                            ? (matriculaSettings?.matriculaUsd ?? 8)
-                            : (matriculaSettings?.matriculaNio ?? 300);
-                        setTotal(base);
-                        setSaldoPendiente(base);
-                      }
+                          setTotal(totalOriginal);
+                          setSaldoPendiente(Math.max(restante, 0));
+                          setCurrency(normalizeCurrency(existing.currency));
+                        } else {
+                          const base =
+                            currency === "USD"
+                              ? (matriculaSettings?.matriculaUsd ?? 8)
+                              : (matriculaSettings?.matriculaNio ?? 300);
+                          setTotal(base);
+                          setSaldoPendiente(base);
+                        }
 
-                      setPaid(0);
+                        setPaid(0);
+                        setRecibidoInput("");
+                        setSelectedStudent(s);
+                        setSearch(s.full_name);
+                      }}
+                    >
+                      <User className="h-4 w-4 mt-1" />
+                      <div>
+                        <p className="font-semibold text-base">{s.full_name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {s.grades?.name}{" "}
+                          {s.sections?.name ? `- ${s.sections?.name}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {selectedStudent && (
+                <div className="mt-3 rounded-md border bg-background p-3 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Seleccionado</p>
+                    <p className="font-semibold">{selectedStudent.full_name}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10"
+                    onClick={() => {
+                      setSelectedStudent(null);
+                      setSearch("");
+                      setSaldoPendiente(0);
                       setRecibidoInput("");
-                      setSelectedStudent(s);
-                      setSearch(s.full_name);
+                      setPaid(0);
                     }}
                   >
-                    <User className="h-4 w-4 mt-1" />
-                    <div>
-                      <p className="font-medium">{s.full_name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {s.grades?.name}{" "}
-                        {s.sections?.name ? `- ${s.sections?.name}` : ""}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                    Cambiar
+                  </Button>
+                </div>
+              )}
+            </div>
 
             {!selectedStudent && (
               <p className="text-xs text-red-500 mt-1">
@@ -508,16 +541,18 @@ export default function Matriculas() {
             )}
 
             {/* TOTAL + MONEDA */}
-            <div className="grid grid-cols-2 gap-4 mt-4">
+            <div className="rounded-lg border p-4 space-y-4 mt-4">
+              <h4 className="text-base font-semibold">Paso 2: Confirmar matrícula y moneda</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="text-sm font-medium">Total matrícula</label>
-                <Input type="text" value={formatMoney(saldoPendiente, currency)} disabled />
+                <Input className="h-12 text-base" type="text" value={formatMoney(saldoPendiente, currency)} disabled />
               </div>
 
               <div>
                 <label className="text-sm font-medium">Moneda</label>
                 <select
-                  className="w-full border rounded px-3 py-2"
+                  className="w-full border rounded px-3 py-2 h-12 text-base"
                   value={currency}
                   onChange={(e) => {
                     const v = e.target.value as "NIO" | "USD";
@@ -550,16 +585,20 @@ export default function Matriculas() {
                 </select>
               </div>
             </div>
+            </div>
 
             {/* RECIBIDO + CAMBIO */}
-            <div className="grid grid-cols-2 gap-4 mt-4">
+            <div className="rounded-lg border p-4 space-y-4 mt-4">
+              <h4 className="text-base font-semibold">Paso 3: Registrar pago</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField
-                label="Recibido"
+                label="Dinero recibido"
                 hint={`Máximo ${currency === "USD" ? "3" : "4"} cifras (${currency === "USD" ? "999.99" : "9999.99"}).`}
                 error={recibidoInput && !isPaidValid ? "Ingresa un monto válido para continuar." : undefined}
               >
                 <Input
                   inputMode="decimal"
+                  className="h-12 text-base"
                   value={recibidoInput}
                   onChange={(e) => {
                     const raw = e.target.value.replace(",", ".");
@@ -577,14 +616,53 @@ export default function Matriculas() {
                 <label className="text-sm font-medium">Cambio</label>
                 <Input
                   disabled
+                  className="h-12 text-base"
                   value={formatMoney(cambio, currency)}
                 />
+              </div>
+            </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 text-sm"
+                  onClick={() => {
+                    const exacto = Number(saldoPendiente.toFixed(2));
+                    setRecibidoInput(exacto.toString());
+                    setPaid(exacto);
+                  }}
+                >
+                  Monto exacto
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 text-sm"
+                  onClick={() => {
+                    const mitad = Number((saldoPendiente / 2).toFixed(2));
+                    setRecibidoInput(mitad.toString());
+                    setPaid(mitad);
+                  }}
+                >
+                  Mitad
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-11 text-sm"
+                  onClick={() => {
+                    setRecibidoInput("");
+                    setPaid(0);
+                  }}
+                >
+                  Limpiar
+                </Button>
               </div>
             </div>
 
             {/* BOTÓN */}
             <Button
-              className="w-full mt-6"
+              className="w-full mt-6 h-12 text-base font-semibold"
               disabled={!selectedStudent || !isPaidValid || saldoPendiente === 0}
               onClick={() => createEnrollment.mutate()}
             >

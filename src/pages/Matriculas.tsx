@@ -14,6 +14,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -99,20 +100,26 @@ export default function Matriculas() {
   const qc = useQueryClient();
 
   const { data: matriculaSettings } = useQuery({
-    queryKey: ["config-settings"],
+    queryKey: ["enrollment-pricing"],
     queryFn: async () => {
-      const { data } = await supabase
-        .from("school_settings")
-        .select("matricula_amount_nio, matricula_amount_usd")
-        .order("created_at", { ascending: false })
+      const { data, error } = await supabase
+        .from("enrollment_pricing")
+        .select("general_amount, currency")
+        .order("updated_at", { ascending: false })
         .limit(1)
         .maybeSingle();
+
+      if (error) throw error;
+
       if (data) {
-        return {
-          matriculaNio: Number(data.matricula_amount_nio ?? 300),
-          matriculaUsd: Number(data.matricula_amount_usd ?? 8),
-        };
+        const amount = Number(data.general_amount ?? 300);
+        const currency = String(data.currency ?? "NIO");
+        const rate = 36.67;
+        return currency === "USD"
+          ? { matriculaNio: amount * rate, matriculaUsd: amount }
+          : { matriculaNio: amount, matriculaUsd: amount / rate };
       }
+
       return { matriculaNio: 300, matriculaUsd: 8 };
     },
   });
@@ -216,17 +223,9 @@ export default function Matriculas() {
           .eq("grade_id", gradeId)
           .maybeSingle();
 
-        const amountNio = Number(
-          priceRow?.monthly_amount ??
-          priceRow?.amount_nio ??
-          770
-        );
+        const amountNio = Number(priceRow?.monthly_amount ?? 770);
 
-        const amountUsd = Number(
-          priceRow?.monthly_amount_usd ??
-          priceRow?.amount_usd ??
-          21
-        );
+        const amountUsd = Number(priceRow?.monthly_amount_usd ?? 21);
 
         const chargeCurrency: "NIO" | "USD" =
           priceRow?.currency === "USD" ? "USD" : "NIO";
@@ -389,7 +388,12 @@ export default function Matriculas() {
       if (err.message === "YA_PAGADO") {
         setInfoMsg("Esta matrícula ya está completamente pagada.");
       } else {
-        setInfoMsg("Error al registrar matrícula.");
+        const detailed =
+          err?.message ||
+          err?.details ||
+          err?.hint ||
+          "Error al registrar matrícula.";
+        setInfoMsg(detailed);
       }
       setOpenInfo(true);
     },
@@ -411,6 +415,9 @@ export default function Matriculas() {
           <DialogContent className="max-w-xl">
             <DialogHeader>
               <DialogTitle>Pago de Matrícula</DialogTitle>
+              <DialogDescription>
+                Selecciona estudiante, monto recibido y moneda para registrar su matrícula.
+              </DialogDescription>
             </DialogHeader>
 
             {/* ESTUDIANTE */}
@@ -573,6 +580,9 @@ export default function Matriculas() {
         <DialogContent className="max-w-sm text-center">
           <DialogHeader>
             <DialogTitle>Atención</DialogTitle>
+            <DialogDescription>
+              Información del resultado del proceso de matrícula.
+            </DialogDescription>
           </DialogHeader>
           <p>{infoMsg}</p>
           <Button className="mt-4 w-full" onClick={() => setOpenInfo(false)}>

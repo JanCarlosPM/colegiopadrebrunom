@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -14,6 +13,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -22,6 +22,15 @@ import { Plus, Printer, Search } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import {
+  MONTHS_ES,
+  DEFAULT_EXCHANGE_RATE,
+  currencySymbol,
+  formatMoney,
+  normalizeCurrency,
+} from "@/lib/billing";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { FormField } from "@/components/common/FormField";
 
 /* ================= RECIBO ================= */
 
@@ -58,13 +67,6 @@ function imprimirRecibo(data: any) {
 
   win.document.close();
 }
-
-const MONTHS = [
-  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
-];
-
-const RATE_USD_TO_NIO = 36.5;
 
 /* ================= FETCHERS ================= */
 
@@ -220,7 +222,7 @@ export default function Pagos() {
     if (nio > 0 && usd > 0) {
       return nio / usd;
     }
-    return RATE_USD_TO_NIO;
+    return DEFAULT_EXCHANGE_RATE;
   }, [selectedGradePrice]);
 
   useEffect(() => {
@@ -248,8 +250,8 @@ export default function Pagos() {
   const paidSoFar = Number(selectedCharge?.paid_amount ?? 0);
   const remainingInChargeCurrency = Math.max(totalOriginal - paidSoFar, 0);
 
-  const chargeCurrency = selectedCharge?.currency ?? "USD";
-  const payCurrency = form.pay_currency ?? "USD";
+  const chargeCurrency = normalizeCurrency(selectedCharge?.currency ?? "USD");
+  const payCurrency = normalizeCurrency(form.pay_currency ?? "USD");
   const maxIntegerDigits = payCurrency === "USD" ? 3 : 4;
   const recibidoRaw = String(form.recibido ?? "").trim();
   const recibidoNormalized = recibidoRaw.replace(",", ".");
@@ -288,8 +290,7 @@ export default function Pagos() {
       ? recibidoNum - amountAppliedInPayCurrency
       : 0;
 
-  const simboloPago = payCurrency === "USD" ? "$" : "C$";
-  const simboloCargo = chargeCurrency === "USD" ? "$" : "C$";
+  const simboloPago = currencySymbol(payCurrency);
   const loadStudentOpenCharges = async (studentId: string) => {
     try {
       const data = await fetchStudentOpenCharges(studentId, year);
@@ -335,7 +336,7 @@ export default function Pagos() {
       }
 
       const paidAt = new Date().toISOString();
-      const safeRate = dynamicRate > 0 ? dynamicRate : RATE_USD_TO_NIO;
+      const safeRate = dynamicRate > 0 ? dynamicRate : DEFAULT_EXCHANGE_RATE;
 
       // Validación fuerte contra BD para evitar duplicados por mes ya pagado.
       const { data: freshCharge, error: freshChargeErr } = await supabase
@@ -449,7 +450,7 @@ export default function Pagos() {
 
       imprimirRecibo({
         estudiante: search,
-        mes: MONTHS[(chargeMonth ?? 1) - 1],
+        mes: MONTHS_ES[(chargeMonth ?? 1) - 1],
         total: Number(totalInPayCurrency || 0).toFixed(2),
         aplicado: Number(appliedInPayCurrency || 0).toFixed(2),
         recibido: recibidoNum.toFixed(2),
@@ -497,7 +498,7 @@ export default function Pagos() {
   });
 
   const filtered = payments.filter((p: any) => {
-    const text = `${p.students?.full_name ?? ""} ${p.students?.grades?.name ?? ""} ${p.students?.sections?.name ?? ""} ${p.description ?? ""} ${p.method ?? ""} ${MONTHS[(p.month ?? 1) - 1] ?? ""}`
+    const text = `${p.students?.full_name ?? ""} ${p.students?.grades?.name ?? ""} ${p.students?.sections?.name ?? ""} ${p.description ?? ""} ${p.method ?? ""} ${MONTHS_ES[(p.month ?? 1) - 1] ?? ""}`
       .toLowerCase();
 
     return text.includes(tableSearch.toLowerCase());
@@ -564,6 +565,9 @@ export default function Pagos() {
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>Pago de Mensualidad</DialogTitle>
+              <DialogDescription>
+                Registra pagos completos o parciales con validación de moneda y saldo.
+              </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-5 mt-2">
@@ -634,7 +638,7 @@ export default function Pagos() {
                           const saldoMes = Number(c.amount || 0) - Number(c.paid_amount || 0);
                           return (
                             <option key={c.id} value={c.id}>
-                              {MONTHS[c.month - 1]} - {c.status} - {c.currency === "USD" ? "$" : "C$"} {Number(saldoMes).toFixed(2)}
+                              {MONTHS_ES[c.month - 1]} - {c.status} - {formatMoney(saldoMes, c.currency)}
                             </option>
                           );
                         })}
@@ -649,19 +653,19 @@ export default function Pagos() {
                         <div>
                           <p className="text-xs text-muted-foreground">Total del cargo</p>
                           <p className="font-semibold">
-                            {simboloCargo} {totalOriginal.toFixed(2)}
+                            {formatMoney(totalOriginal, chargeCurrency)}
                           </p>
                         </div>
                         <div>
                           <p className="text-xs text-muted-foreground">Abonado</p>
                           <p className="font-semibold">
-                            {simboloCargo} {paidSoFar.toFixed(2)}
+                            {formatMoney(paidSoFar, chargeCurrency)}
                           </p>
                         </div>
                         <div>
                           <p className="text-xs text-muted-foreground">Saldo pendiente</p>
                           <p className="font-semibold">
-                            {simboloPago} {remainingInPayCurrency.toFixed(2)}
+                            {formatMoney(remainingInPayCurrency, payCurrency)}
                           </p>
                         </div>
                       </div>
@@ -687,10 +691,10 @@ export default function Pagos() {
                           </select>
                         </div>
 
-                        <div>
-                          <label className="text-sm font-medium block mb-2">
-                            Recibido
-                          </label>
+                        <FormField
+                          label="Recibido"
+                          hint={`Máximo ${payCurrency === "USD" ? "3" : "4"} cifras (${payCurrency === "USD" ? "999.99" : "9999.99"}).`}
+                        >
                           <Input
                             inputMode="decimal"
                             pattern="^[0-9]*([.,][0-9]{0,2})?$"
@@ -704,10 +708,7 @@ export default function Pagos() {
                               setForm({ ...form, recibido: raw });
                             }}
                           />
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Máximo {payCurrency === "USD" ? "3" : "4"} cifras ({payCurrency === "USD" ? "999.99" : "9999.99"}).
-                          </p>
-                        </div>
+                        </FormField>
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -717,7 +718,7 @@ export default function Pagos() {
                           </label>
                           <Input
                             disabled
-                            value={`${simboloPago} ${amountAppliedInPayCurrency.toFixed(2)}`}
+                            value={formatMoney(amountAppliedInPayCurrency, payCurrency)}
                           />
                         </div>
 
@@ -727,7 +728,7 @@ export default function Pagos() {
                           </label>
                           <Input
                             disabled
-                            value={`${simboloPago} ${cambio.toFixed(2)}`}
+                            value={formatMoney(cambio, payCurrency)}
                           />
                         </div>
                       </div>
@@ -773,37 +774,34 @@ export default function Pagos() {
         </TableHeader>
 
         <TableBody>
+          {filtered.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                No hay pagos registrados para este filtro.
+              </TableCell>
+            </TableRow>
+          )}
           {filtered.map((p: any) => {
-            const simbolo = p.currency === "USD" ? "$" : "C$";
+            const simbolo = currencySymbol(p.currency);
 
             return (
               <TableRow key={p.id}>
                 <TableCell>{p.students?.full_name}</TableCell>
-                <TableCell>{MONTHS[p.month - 1] ?? p.month}</TableCell>
+                <TableCell>{MONTHS_ES[p.month - 1] ?? p.month}</TableCell>
                 <TableCell>
-                  {simbolo} {Number(p.amount || 0).toFixed(2)}
+                  {formatMoney(Number(p.amount || 0), p.currency)}
                 </TableCell>
                 <TableCell>
-                  {simbolo} {Number(p.received_amount || 0).toFixed(2)}
+                  {formatMoney(Number(p.received_amount || 0), p.currency)}
                 </TableCell>
                 <TableCell>
-                  {simbolo} {Number(p.change_amount || 0).toFixed(2)}
+                  {formatMoney(Number(p.change_amount || 0), p.currency)}
                 </TableCell>
                 <TableCell>
                   {p.currency === "USD" ? "Dólares" : "Córdobas"}
                 </TableCell>
                 <TableCell>
-                  <Badge
-                    className={
-                      p.description === "PAGADO"
-                        ? "bg-green-100 text-green-700"
-                        : p.description === "PARCIAL"
-                          ? "bg-yellow-100 text-yellow-700"
-                          : "bg-blue-100 text-blue-700"
-                    }
-                  >
-                    {p.description ?? "COMPLETADO"}
-                  </Badge>
+                  <StatusBadge status={p.description ?? "COMPLETADO"} />
                 </TableCell>
                 <TableCell>
                   {new Date(p.paid_at).toLocaleString("es-NI", {
@@ -817,7 +815,7 @@ export default function Pagos() {
                     onClick={() =>
                       imprimirRecibo({
                         estudiante: p.students?.full_name,
-                        mes: MONTHS[p.month - 1] ?? p.month,
+                        mes: MONTHS_ES[p.month - 1] ?? p.month,
                         total: Number(p.amount || 0).toFixed(2),
                         aplicado: Number(p.amount || 0).toFixed(2),
                         recibido: Number(p.received_amount || 0).toFixed(2),

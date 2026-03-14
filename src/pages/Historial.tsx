@@ -4,20 +4,19 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { StatsCard } from "@/components/StatsCard";
 import { DollarSign, CheckCircle, AlertTriangle, Calendar, RefreshCw } from "lucide-react";
+import {
+  MONTHS_ES,
+  convertCurrency,
+  formatMoney,
+  normalizeCurrency,
+} from "@/lib/billing";
+import { StatusBadge } from "@/components/common/StatusBadge";
 
 /* =========================
    CONSTANTE MESES
 ========================= */
-
-const MONTHS = [
-  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
-];
-
-const RATE_USD_TO_NIO = 36.67;
 
 /* =========================
    COMPONENT
@@ -211,7 +210,7 @@ export default function Historial() {
   }, [payments]);
 
   const monthlyRows = useMemo(() => {
-    return MONTHS.map((monthName, i) => {
+    return MONTHS_ES.map((monthName, i) => {
       const monthNumber = i + 1;
       const monthCharges = charges.filter((c) => Number(c.month) === monthNumber);
       const monthPayments = payments.filter((p) => Number(p.month) === monthNumber);
@@ -234,7 +233,7 @@ export default function Historial() {
             )[0]
           : null;
 
-      const chargeCurrency = latestCharge?.currency ?? "NIO";
+      const chargeCurrency = normalizeCurrency(latestCharge?.currency ?? "NIO");
       const totalCharge = Number(latestCharge?.amount || 0);
       const paidNio = monthPayments
         .filter((p) => (p.currency ?? "NIO") === "NIO")
@@ -245,15 +244,15 @@ export default function Historial() {
 
       const paidInChargeCurrency =
         chargeCurrency === "USD"
-          ? paidUsd + paidNio / RATE_USD_TO_NIO
-          : paidNio + paidUsd * RATE_USD_TO_NIO;
+          ? paidUsd + convertCurrency(paidNio, "NIO", "USD")
+          : paidNio + convertCurrency(paidUsd, "USD", "NIO");
 
       const saldoChargeCurrency = Math.max(totalCharge - paidInChargeCurrency, 0);
 
       const totalChargeNio =
         totalCharge > 0
           ? chargeCurrency === "USD"
-            ? totalCharge * RATE_USD_TO_NIO
+            ? convertCurrency(totalCharge, "USD", "NIO")
             : totalCharge
           : 0;
 
@@ -261,7 +260,7 @@ export default function Historial() {
         totalCharge > 0
           ? chargeCurrency === "USD"
             ? totalCharge
-            : totalCharge / RATE_USD_TO_NIO
+            : convertCurrency(totalCharge, "NIO", "USD")
           : 0;
 
       const changeNio = monthPayments
@@ -303,10 +302,10 @@ export default function Historial() {
         if (row.status !== "Pendiente" && row.status !== "Parcial") return acc;
         if (row.chargeCurrency === "USD") {
           acc.usd += row.saldoChargeCurrency;
-          acc.nio += row.saldoChargeCurrency * RATE_USD_TO_NIO;
+          acc.nio += convertCurrency(row.saldoChargeCurrency, "USD", "NIO");
         } else {
           acc.nio += row.saldoChargeCurrency;
-          acc.usd += row.saldoChargeCurrency / RATE_USD_TO_NIO;
+          acc.usd += convertCurrency(row.saldoChargeCurrency, "NIO", "USD");
         }
         return acc;
       },
@@ -406,15 +405,7 @@ export default function Historial() {
                 </p>
               </div>
 
-              <Badge
-                className={
-                  generalStatus === "Moroso"
-                    ? "bg-red-100 text-red-700"
-                    : "bg-green-100 text-green-700"
-                }
-              >
-                {generalStatus}
-              </Badge>
+              <StatusBadge status={generalStatus} />
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-sm">
@@ -486,31 +477,17 @@ export default function Historial() {
             {enrollment ? (
               <div className="flex items-center gap-4 text-sm">
                 <span>
-                  Total: {enrollment.currency === "USD" ? "$" : "C$"}{" "}
-                  {Number(enrollment.total_amount || 0).toLocaleString()}
+                  Total: {formatMoney(Number(enrollment.total_amount || 0), enrollment.currency)}
                 </span>
                 <span>
-                  Pagado: {enrollment.currency === "USD" ? "$" : "C$"}{" "}
-                  {Number(enrollment.paid_amount || 0).toLocaleString()}
+                  Pagado: {formatMoney(Number(enrollment.paid_amount || 0), enrollment.currency)}
                 </span>
-                <Badge
-                  className={
-                    enrollment.status === "PAGADO"
-                      ? "bg-green-100 text-green-700"
-                      : enrollment.status === "PARCIAL"
-                        ? "bg-yellow-100 text-yellow-700"
-                        : "bg-red-100 text-red-700"
-                  }
-                >
-                  {enrollment.status}
-                </Badge>
+                <StatusBadge status={enrollment.status} />
               </div>
             ) : (
               <div className="flex items-center gap-4 text-sm">
                 <span>Sin registro de matrícula para este año</span>
-                <Badge className="bg-red-100 text-red-700">
-                  PENDIENTE
-                </Badge>
+                <StatusBadge status="PENDIENTE" />
               </div>
             )}
           </div>
@@ -587,19 +564,10 @@ export default function Historial() {
                         </TableCell>
 
                         <TableCell>
-                          <Badge
-                            className={
-                              row.status === "Pagado"
-                                ? "bg-green-100 text-green-700"
-                                : row.status === "Parcial"
-                                  ? "bg-yellow-100 text-yellow-700"
-                                  : row.status === "Pendiente"
-                                    ? "bg-red-100 text-red-700"
-                                    : "bg-gray-100 text-gray-700"
-                            }
-                          >
-                            {row.status}
-                          </Badge>
+                          <StatusBadge
+                            status={row.status === "Pagado" ? "PAGADO" : row.status === "Parcial" ? "PARCIAL" : row.status === "Pendiente" ? "PENDIENTE" : row.status}
+                            label={row.status}
+                          />
                         </TableCell>
                       </TableRow>
                     );

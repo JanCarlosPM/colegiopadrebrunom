@@ -14,14 +14,14 @@ export function StatsCard({
   variant = "primary",
 }: StatsCardProps) {
   const colors = {
-    success: "bg-green-100 text-green-700",
-    destructive: "bg-red-100 text-red-700",
-    warning: "bg-yellow-100 text-yellow-700",
-    primary: "bg-blue-100 text-blue-700",
+    success: "bg-success/10 text-success",
+    destructive: "bg-destructive/10 text-destructive",
+    warning: "bg-warning/10 text-warning",
+    primary: "bg-primary/10 text-primary",
   };
 
   return (
-    <div className="bg-card rounded-xl border shadow-sm p-5 flex items-center justify-between">
+    <div className="rounded-xl border bg-card p-5 shadow-sm transition-shadow hover:shadow-md flex items-center justify-between">
       <div>
         <p className="text-sm text-muted-foreground">{title}</p>
         <p className="text-xl font-bold mt-1">{value}</p>

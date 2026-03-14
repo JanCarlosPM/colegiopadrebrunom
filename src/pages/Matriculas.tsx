@@ -23,6 +23,13 @@ import { Plus, User } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { imprimirReciboMatricula } from "@/utils/imprimirReciboMatricula";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { FormField } from "@/components/common/FormField";
+import {
+  DEFAULT_EXCHANGE_RATE,
+  formatMoney,
+  normalizeCurrency,
+} from "@/lib/billing";
 
 /* ================= FETCH ================= */
 
@@ -113,8 +120,8 @@ export default function Matriculas() {
 
       if (data) {
         const amount = Number(data.general_amount ?? 300);
-        const currency = String(data.currency ?? "NIO");
-        const rate = 36.67;
+        const currency = normalizeCurrency(String(data.currency ?? "NIO"));
+        const rate = DEFAULT_EXCHANGE_RATE;
         return currency === "USD"
           ? { matriculaNio: amount * rate, matriculaUsd: amount }
           : { matriculaNio: amount, matriculaUsd: amount / rate };
@@ -148,9 +155,10 @@ export default function Matriculas() {
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
 
   const [currency, setCurrency] = useState<"NIO" | "USD">("NIO");
-  const [total, setTotal] = useState(300);
   const [paid, setPaid] = useState(0);
+  const [recibidoInput, setRecibidoInput] = useState("");
   const [tableSearch, setTableSearch] = useState("");
+  const [total, setTotal] = useState(300);
 
   const cambio = Math.max(paid - saldoPendiente, 0);
 
@@ -192,11 +200,19 @@ export default function Matriculas() {
     });
   }, [payments, tableSearch]);
 
+  const maxIntegerDigits = currency === "USD" ? 3 : 4;
+  const normalizedPaidInput = recibidoInput.replace(",", ".");
+  const [intPartPaid = ""] = normalizedPaidInput.split(".");
+  const isPaidFormatValid = /^\d*\.?\d{0,2}$/.test(normalizedPaidInput);
+  const isPaidDigitsValid = intPartPaid.length <= maxIntegerDigits;
+  const isPaidValid = isPaidFormatValid && isPaidDigitsValid && paid > 0;
+
   /* ================= MUTATION ================= */
 
   const createEnrollment = useMutation({
     mutationFn: async () => {
       if (!selectedStudent) throw new Error("NO_STUDENT");
+      if (!isPaidValid) throw new Error("MONTO_INVALIDO");
 
       const now = new Date().toISOString();
 
@@ -250,30 +266,30 @@ export default function Matriculas() {
             .filter((m: number) => m >= 1 && m <= 12)
         );
 
-        const missingMonths = Array.from({ length: 12 }, (_, i) => i + 1).filter(
-          (m) => !existingMonths.has(m)
-        );
+        const missingRows = Array.from({ length: 12 }, (_, i) => i + 1)
+          .filter((month) => !existingMonths.has(month))
+          .map((month) => ({
+            student_id: selectedStudent.id,
+            academic_year: year,
+            grade_id: gradeId,
+            concept: "MENSUALIDAD",
+            month,
+            due_date: `${year}-${String(month).padStart(2, "0")}-10`,
+            amount: monthlyAmount,
+            currency: chargeCurrency,
+            status: "PENDIENTE",
+            paid_amount: 0,
+          }));
 
-        if (missingMonths.length === 0) return;
-
-        const rows = missingMonths.map((month) => ({
-          student_id: selectedStudent.id,
-          academic_year: year,
-          grade_id: gradeId,
-          concept: "MENSUALIDAD",
-          month,
-          due_date: `${year}-${String(month).padStart(2, "0")}-10`,
-          amount: monthlyAmount,
-          currency: chargeCurrency,
-          status: "PENDIENTE",
-          paid_amount: 0,
-        }));
+        if (missingRows.length === 0) return;
 
         const { error: insertChargesError } = await supabase
           .from("charges")
-          .insert(rows);
+          .insert(missingRows);
 
-        if (insertChargesError) throw insertChargesError;
+        if (insertChargesError && insertChargesError.code !== "23505") {
+          throw insertChargesError;
+        }
       };
 
       if (!existing) {
@@ -377,6 +393,7 @@ export default function Matriculas() {
       }, 300);
 
       setPaid(0);
+      setRecibidoInput("");
       setSearch("");
       setSelectedStudent(null);
       setSaldoPendiente(0);
@@ -387,6 +404,12 @@ export default function Matriculas() {
     onError: (err: any) => {
       if (err.message === "YA_PAGADO") {
         setInfoMsg("Esta matrícula ya está completamente pagada.");
+      } else if (err.message === "MONTO_INVALIDO") {
+        setInfoMsg(
+          currency === "USD"
+            ? "Recibido inválido. En USD se permiten hasta 3 cifras (999.99)."
+            : "Recibido inválido. En C$ se permiten hasta 4 cifras (9999.99)."
+        );
       } else {
         const detailed =
           err?.message ||
@@ -449,7 +472,7 @@ export default function Matriculas() {
 
                         setTotal(totalOriginal);
                         setSaldoPendiente(Math.max(restante, 0));
-                        setCurrency(existing.currency);
+                        setCurrency(normalizeCurrency(existing.currency));
                       } else {
                         const base =
                           currency === "USD"
@@ -460,6 +483,7 @@ export default function Matriculas() {
                       }
 
                       setPaid(0);
+                      setRecibidoInput("");
                       setSelectedStudent(s);
                       setSearch(s.full_name);
                     }}
@@ -487,7 +511,7 @@ export default function Matriculas() {
             <div className="grid grid-cols-2 gap-4 mt-4">
               <div>
                 <label className="text-sm font-medium">Total matrícula</label>
-                <Input type="number" value={saldoPendiente} disabled />
+                <Input type="text" value={formatMoney(saldoPendiente, currency)} disabled />
               </div>
 
               <div>
@@ -509,7 +533,7 @@ export default function Matriculas() {
                           Number(enrollment.total_amount) -
                           Number(enrollment.paid_amount);
 
-                        const tasa = 36;
+                        const tasa = DEFAULT_EXCHANGE_RATE;
                         const convertido =
                           v === "USD" ? restante / tasa : restante * tasa;
 
@@ -518,6 +542,7 @@ export default function Matriculas() {
                     }
 
                     setPaid(0);
+                    setRecibidoInput("");
                   }}
                 >
                   <option value="NIO">Córdobas (C$)</option>
@@ -528,38 +553,31 @@ export default function Matriculas() {
 
             {/* RECIBIDO + CAMBIO */}
             <div className="grid grid-cols-2 gap-4 mt-4">
-              <div>
-                <label className="text-sm font-medium">Recibido</label>
+              <FormField
+                label="Recibido"
+                hint={`Máximo ${currency === "USD" ? "3" : "4"} cifras (${currency === "USD" ? "999.99" : "9999.99"}).`}
+                error={recibidoInput && !isPaidValid ? "Ingresa un monto válido para continuar." : undefined}
+              >
                 <Input
-                  type="text"
-                  value={paid || ""}
-                  maxLength={currency === "USD" ? 3 : 4}
+                  inputMode="decimal"
+                  value={recibidoInput}
                   onChange={(e) => {
-                    const value = e.target.value.replace(/[^0-9]/g, "");
-                    const limited =
-                      currency === "USD"
-                        ? value.slice(0, 3)
-                        : value.slice(0, 4);
-
-                    setPaid(Number(limited));
+                    const raw = e.target.value.replace(",", ".");
+                    if (!/^\d*\.?\d{0,2}$/.test(raw)) return;
+                    const [intPart = ""] = raw.split(".");
+                    const maxDigits = currency === "USD" ? 3 : 4;
+                    if (intPart.length > maxDigits) return;
+                    setRecibidoInput(raw);
+                    setPaid(Number(raw || 0));
                   }}
                 />
-                {!paid && (
-                  <p className="text-xs text-red-500 mt-1">
-                    Campo obligatorio
-                  </p>
-                )}
-              </div>
+              </FormField>
 
               <div>
                 <label className="text-sm font-medium">Cambio</label>
                 <Input
                   disabled
-                  value={
-                    cambio > 0
-                      ? `${currency === "USD" ? "$" : "C$"} ${cambio}`
-                      : `${currency === "USD" ? "$" : "C$"} 0`
-                  }
+                  value={formatMoney(cambio, currency)}
                 />
               </div>
             </div>
@@ -567,7 +585,7 @@ export default function Matriculas() {
             {/* BOTÓN */}
             <Button
               className="w-full mt-6"
-              disabled={!selectedStudent || paid <= 0 || saldoPendiente === 0}
+              disabled={!selectedStudent || !isPaidValid || saldoPendiente === 0}
               onClick={() => createEnrollment.mutate()}
             >
               {createEnrollment.isPending ? "Registrando..." : "Registrar Pago"}
@@ -639,6 +657,13 @@ export default function Matriculas() {
         </TableHeader>
 
         <TableBody>
+          {filteredPayments.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                No hay pagos de matrícula para este filtro.
+              </TableCell>
+            </TableRow>
+          )}
           {filteredPayments.map((p: any) => (
             <TableRow key={p.id}>
               <TableCell>{p.students?.full_name}</TableCell>
@@ -648,31 +673,21 @@ export default function Matriculas() {
               <TableCell>{p.students?.sections?.name ?? "-"}</TableCell>
 
               <TableCell>
-                {p.currency === "USD" ? "$" : "C$"} {Number(p.amount).toFixed(2)}
+                {formatMoney(Number(p.amount || 0), p.currency)}
               </TableCell>
 
               <TableCell>
-                {p.currency === "USD" ? "$" : "C$"} {Number(p.received_amount || 0).toFixed(2)}
+                {formatMoney(Number(p.received_amount || 0), p.currency)}
               </TableCell>
 
               <TableCell>
-                {p.currency === "USD" ? "$" : "C$"} {Number(p.change_amount || 0).toFixed(2)}
+                {formatMoney(Number(p.change_amount || 0), p.currency)}
               </TableCell>
 
               <TableCell>{p.currency === "USD" ? "Dólares" : "Córdobas"}</TableCell>
 
               <TableCell>
-                <span
-                  className={`px-2 py-1 rounded text-xs ${
-                    p.description === "PAGADO"
-                      ? "bg-green-100 text-green-700"
-                      : p.description === "PARCIAL"
-                      ? "bg-yellow-100 text-yellow-700"
-                      : "bg-red-100 text-red-700"
-                  }`}
-                >
-                  {p.description ?? "—"}
-                </span>
+                <StatusBadge status={p.description ?? "—"} />
               </TableCell>
 
               <TableCell>

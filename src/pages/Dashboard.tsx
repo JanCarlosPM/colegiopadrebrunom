@@ -11,17 +11,13 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery } from "@tanstack/react-query";
-
-const MONTHS = [
-  "enero", "febrero", "marzo", "abril", "mayo", "junio",
-  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
-];
+import { MONTHS_ES } from "@/lib/billing";
 
 const Dashboard = () => {
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonthNumber = now.getMonth() + 1;
-  const currentMonthName = MONTHS[currentMonthNumber - 1];
+  const currentMonthName = MONTHS_ES[currentMonthNumber - 1].toLowerCase();
 
   const yearStart = `${currentYear}-01-01T00:00:00`;
   const yearEnd = `${currentYear + 1}-01-01T00:00:00`;
@@ -87,39 +83,33 @@ const Dashboard = () => {
 
       const matriculados = enrollments?.length ?? 0;
 
-      // ===== SOLVENTES / PENDIENTES DEL MES =====
-      const paidStudentsThisMonth = new Set(
-        (monthlyPayments ?? []).map((p: any) => p.student_id)
+      // ===== SOLVENTES / PENDIENTES DEL MES (fuente única: charges) =====
+      const currentMonthCharges = (allMonthlyCharges ?? []).filter(
+        (c: any) => Number(c.month) === currentMonthNumber
       );
+      const solventes = new Set(
+        currentMonthCharges
+          .filter((c: any) => c.status === "PAGADO")
+          .map((c: any) => c.student_id)
+          .filter(Boolean)
+      ).size;
+      const pendientes = new Set(
+        currentMonthCharges
+          .filter((c: any) => c.status === "PENDIENTE" || c.status === "PARCIAL")
+          .map((c: any) => c.student_id)
+          .filter(Boolean)
+      ).size;
 
-      const solventes = paidStudentsThisMonth.size;
-      const pendientes = Math.max(matriculados - solventes, 0);
-
-      // ===== MOROSOS DEL MES =====
-      // Para no contradecir solventes/pendientes, lo dejamos igual a pendientes del mes
+      // Moroso mensual: tiene cargo del mes y no está PAGADO.
       const morososMes = pendientes;
 
       // ===== PENDIENTE TOTAL MENSUALIDADES =====
-      // Estudiantes con al menos una mensualidad pendiente real
-      // Excluimos meses que ya tienen pago registrado
-      const paidPairs = new Set(
-        (allMonthlyPayments ?? [])
-          .filter((p: any) => p.student_id && p.month != null)
-          .map((p: any) => `${p.student_id}-${p.month}`)
-      );
-
-      const pendingStudentIds = new Set(
+      const pendienteTotalMensualidades = new Set(
         (allMonthlyCharges ?? [])
-          .filter((c: any) =>
-            c.status === "PENDIENTE" &&
-            c.student_id &&
-            c.month != null &&
-            !paidPairs.has(`${c.student_id}-${c.month}`)
-          )
+          .filter((c: any) => c.status === "PENDIENTE" || c.status === "PARCIAL")
           .map((c: any) => c.student_id)
-      );
-
-      const pendienteTotalMensualidades = pendingStudentIds.size;
+          .filter(Boolean)
+      ).size;
 
       // ===== PARCIALES =====
       const matriculaParcial =

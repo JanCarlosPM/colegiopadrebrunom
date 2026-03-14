@@ -17,11 +17,12 @@ import { FileText, Download, Users, DollarSign, AlertTriangle } from "lucide-rea
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-
-const MONTHS = [
-  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
-];
+import {
+  MONTHS_ES,
+  convertCurrency,
+  formatMoney,
+  normalizeCurrency,
+} from "@/lib/billing";
 
 const REPORT_CATEGORIES = {
   resumen: "Resumen",
@@ -201,14 +202,34 @@ export default function Reportes() {
         0
       );
       const pendienteMatricula = enrollmentsInYear.reduce(
-        (sum: number, e: { total_amount?: number; paid_amount?: number }) =>
-          sum + Math.max(Number(e.total_amount || 0) - Number(e.paid_amount || 0), 0),
-        0
+        (sum: { nio: number; usd: number }, e: { total_amount?: number; paid_amount?: number; currency?: string }) => {
+          const pending = Math.max(Number(e.total_amount || 0) - Number(e.paid_amount || 0), 0);
+          const currency = normalizeCurrency(e.currency);
+          if (currency === "USD") {
+            sum.usd += pending;
+            sum.nio += convertCurrency(pending, "USD", "NIO");
+          } else {
+            sum.nio += pending;
+            sum.usd += convertCurrency(pending, "NIO", "USD");
+          }
+          return sum;
+        },
+        { nio: 0, usd: 0 }
       );
       const pendienteMensualidades = chargesInYear.reduce(
-        (sum: number, c: { amount?: number; paid_amount?: number }) =>
-          sum + Math.max(Number(c.amount || 0) - Number(c.paid_amount || 0), 0),
-        0
+        (sum: { nio: number; usd: number }, c: { amount?: number; paid_amount?: number; currency?: string }) => {
+          const pending = Math.max(Number(c.amount || 0) - Number(c.paid_amount || 0), 0);
+          const currency = normalizeCurrency(c.currency);
+          if (currency === "USD") {
+            sum.usd += pending;
+            sum.nio += convertCurrency(pending, "USD", "NIO");
+          } else {
+            sum.nio += pending;
+            sum.usd += convertCurrency(pending, "NIO", "USD");
+          }
+          return sum;
+        },
+        { nio: 0, usd: 0 }
       );
       return [
         { indicador: "Matrículas del año", valor: totalMatriculados, tipo: "numero" },
@@ -216,8 +237,16 @@ export default function Reportes() {
         { indicador: "Ingresos matrícula (USD)", valor: (ingresosMatriculaPagosUSD || ingresosMatriculaUSD).toFixed(2), tipo: "moneda" },
         { indicador: "Ingresos mensualidades (C$)", valor: ingresosMensualidadNIO.toFixed(2), tipo: "moneda" },
         { indicador: "Ingresos mensualidades (USD)", valor: ingresosMensualidadUSD.toFixed(2), tipo: "moneda" },
-        { indicador: "Pendiente matrículas", valor: pendienteMatricula.toFixed(2), tipo: "moneda" },
-        { indicador: "Pendiente mensualidades", valor: pendienteMensualidades.toFixed(2), tipo: "moneda" },
+        {
+          indicador: "Pendiente matrículas",
+          valor: `C$ ${pendienteMatricula.nio.toFixed(2)} | $ ${pendienteMatricula.usd.toFixed(2)}`,
+          tipo: "moneda",
+        },
+        {
+          indicador: "Pendiente mensualidades",
+          valor: `C$ ${pendienteMensualidades.nio.toFixed(2)} | $ ${pendienteMensualidades.usd.toFixed(2)}`,
+          tipo: "moneda",
+        },
       ];
     }
 
@@ -253,7 +282,7 @@ export default function Reportes() {
         else byMonth[m].usd += Number(p.amount || 0);
       });
       return Object.entries(byMonth).map(([mesNum, vals]) => ({
-        mes: MONTHS[Number(mesNum) - 1],
+        mes: MONTHS_ES[Number(mesNum) - 1],
         "C$": Number(vals.nio.toFixed(2)),
         "$ USD": Number(vals.usd.toFixed(2)),
         total_nio: vals.nio,
@@ -281,8 +310,8 @@ export default function Reportes() {
           estudiante: s?.full_name ?? "—",
           grado: s?.grades?.name ?? "—",
           concepto: p.concept ?? "—",
-          mes: p.concept === "MENSUALIDAD" && p.month ? MONTHS[p.month - 1] : "—",
-          monto: `${p.currency === "USD" ? "$" : "C$"} ${Number(p.amount || 0).toLocaleString()}`,
+          mes: p.concept === "MENSUALIDAD" && p.month ? MONTHS_ES[p.month - 1] : "—",
+          monto: formatMoney(Number(p.amount || 0), p.currency),
           recibido: Number(p.received_amount ?? p.amount ?? 0).toLocaleString(),
           cambio: Number(p.change_amount ?? 0).toLocaleString(),
           metodo: p.method ?? "—",
@@ -330,10 +359,10 @@ export default function Reportes() {
             estudiante: s.full_name,
             grado: s.grades?.name ?? "—",
             seccion: s.sections?.name ?? "—",
-            mes: c.month ? MONTHS[c.month - 1] : "—",
-            monto_cargo: `${c.currency === "USD" ? "$" : "C$"} ${total.toLocaleString()}`,
-            pagado: `${c.currency === "USD" ? "$" : "C$"} ${pagado.toLocaleString()}`,
-            pendiente: `${c.currency === "USD" ? "$" : "C$"} ${pendiente.toLocaleString()}`,
+            mes: c.month ? MONTHS_ES[c.month - 1] : "—",
+            monto_cargo: formatMoney(total, c.currency),
+            pagado: formatMoney(pagado, c.currency),
+            pendiente: formatMoney(pendiente, c.currency),
             estado: c.status,
           });
         });
@@ -385,9 +414,9 @@ export default function Reportes() {
             nombre: s.full_name,
             grado: s.grades?.name ?? "—",
             seccion: s.sections?.name ?? "—",
-            mes: c.month ? MONTHS[c.month - 1] : "—",
-            monto: `${c.currency === "USD" ? "$" : "C$"} ${Number(c.amount || 0).toLocaleString()}`,
-            pagado: `${c.currency === "USD" ? "$" : "C$"} ${Number(c.paid_amount || 0).toLocaleString()}`,
+            mes: c.month ? MONTHS_ES[c.month - 1] : "—",
+            monto: formatMoney(Number(c.amount || 0), c.currency),
+            pagado: formatMoney(Number(c.paid_amount || 0), c.currency),
             estado: c.status,
             vencimiento: c.due_date ? new Date(c.due_date).toLocaleDateString("es-NI") : "—",
           });
@@ -408,8 +437,8 @@ export default function Reportes() {
           grado: s?.grades?.name ?? "—",
           seccion: s?.sections?.name ?? "—",
           concepto: p.concept,
-          mes: p.concept === "MENSUALIDAD" && p.month ? MONTHS[p.month - 1] : "—",
-          monto: `${p.currency === "USD" ? "$" : "C$"} ${Number(p.amount || 0).toLocaleString()}`,
+          mes: p.concept === "MENSUALIDAD" && p.month ? MONTHS_ES[p.month - 1] : "—",
+          monto: formatMoney(Number(p.amount || 0), p.currency),
           metodo: p.method ?? "—",
           estado: p.status ?? "—",
           fecha: p.paid_at ? new Date(p.paid_at).toLocaleString("es-NI") : "—",
@@ -442,15 +471,18 @@ export default function Reportes() {
           const studentCharges = chargesInYear.filter((c: any) => c.student_id === s.id);
           const hasPending = studentCharges.some((c: any) => c.status === "PENDIENTE");
           if (!hasPending) return null;
-          const pendienteTotal = studentCharges
+          const pendingNio = studentCharges
             .filter((c: any) => c.status === "PENDIENTE" || c.status === "PARCIAL")
-            .reduce((sum: number, c: any) => sum + Math.max(Number(c.amount || 0) - Number(c.paid_amount || 0), 0), 0);
+            .reduce((sum: number, c: any) => {
+              const pending = Math.max(Number(c.amount || 0) - Number(c.paid_amount || 0), 0);
+              return normalizeCurrency(c.currency) === "USD" ? sum + convertCurrency(pending, "USD", "NIO") : sum + pending;
+            }, 0);
           return {
             nombre: s.full_name,
             grado: s.grades?.name ?? "—",
             seccion: s.sections?.name ?? "—",
             estado: "MOROSO",
-            pendiente: `C$${pendienteTotal.toLocaleString()}`,
+            pendiente: `C$ ${pendingNio.toFixed(2)} | $ ${convertCurrency(pendingNio, "NIO", "USD").toFixed(2)}`,
           };
         })
         .filter(Boolean);
@@ -610,7 +642,7 @@ export default function Reportes() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos</SelectItem>
-                  {MONTHS.map((m, i) => (
+                  {MONTHS_ES.map((m, i) => (
                     <SelectItem key={i} value={String(i + 1)}>
                       {m}
                     </SelectItem>
@@ -669,18 +701,18 @@ export default function Reportes() {
             <CardContent className="pt-4">
               <div className="flex items-center gap-2">
                 <DollarSign className="h-5 w-5 text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">Pendiente matrículas (C$)</span>
+                <span className="text-sm text-muted-foreground">Pendiente matrículas</span>
               </div>
-              <p className="text-2xl font-semibold mt-1">C$ {Number(summaryCards.pendMat).toLocaleString()}</p>
+              <p className="text-2xl font-semibold mt-1">{summaryCards.pendMat}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5 text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">Pendiente mensualidades (C$)</span>
+                <span className="text-sm text-muted-foreground">Pendiente mensualidades</span>
               </div>
-              <p className="text-2xl font-semibold mt-1">C$ {Number(summaryCards.pendMen).toLocaleString()}</p>
+              <p className="text-2xl font-semibold mt-1">{summaryCards.pendMen}</p>
             </CardContent>
           </Card>
         </div>

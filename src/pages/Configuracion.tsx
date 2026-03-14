@@ -66,8 +66,20 @@ type SettingsRow = {
 };
 
 type GradeRow = { id: string; name: string; sort_order?: number | null };
-type GradePriceRow = { id: string; grade_id: string; amount_nio: number; amount_usd: number };
+type GradePriceRow = {
+  id: string;
+  grade_id: string;
+  monthly_amount?: number | null;
+  monthly_amount_usd?: number | null;
+  amount_nio?: number | null;
+  amount_usd?: number | null;
+  currency?: string | null;
+};
 type AppUserRow = { id: string; email: string; full_name: string | null; role: string; is_active: boolean };
+
+const DEFAULT_MONTHLY_NIO = 770;
+const DEFAULT_MONTHLY_USD = 21;
+const DEFAULT_EXCHANGE_RATE = 36.67;
 
 /* ================= FETCHERS ================= */
 
@@ -92,7 +104,7 @@ const fetchGrades = async (): Promise<GradeRow[]> => {
 };
 
 const fetchGradePrices = async (): Promise<GradePriceRow[]> => {
-  const { data, error } = await supabase.from("grade_prices").select("id, grade_id, amount_nio, amount_usd");
+  const { data, error } = await supabase.from("grade_prices").select("*");
   if (error) throw error;
   return data ?? [];
 };
@@ -137,6 +149,7 @@ const Configuracion = () => {
   const [matriculaUsd, setMatriculaUsd] = useState("");
   const [matriculaDiscountSiblings, setMatriculaDiscountSiblings] = useState(true);
   const [matriculaDiscountEarly, setMatriculaDiscountEarly] = useState(false);
+  const [exchangeRate, setExchangeRate] = useState(String(DEFAULT_EXCHANGE_RATE));
 
   const [userDialogOpen, setUserDialogOpen] = useState(false);
   const [userEditId, setUserEditId] = useState<string | null>(null);
@@ -169,9 +182,19 @@ const Configuracion = () => {
     const next: Record<string, { nio: string; usd: string }> = {};
     grades.forEach((g) => {
       const pr = gradePrices.find((p) => p.grade_id === g.id);
+      const nioValue = Number(
+        pr?.monthly_amount ??
+        pr?.amount_nio ??
+        DEFAULT_MONTHLY_NIO
+      );
+      const usdValue = Number(
+        pr?.monthly_amount_usd ??
+        pr?.amount_usd ??
+        DEFAULT_MONTHLY_USD
+      );
       next[g.id] = {
-        nio: pr ? String(pr.amount_nio) : "1500",
-        usd: pr ? String(pr.amount_usd) : "50",
+        nio: String(nioValue),
+        usd: String(usdValue),
       };
     });
     setPreciosByGrade(next);
@@ -219,13 +242,53 @@ const Configuracion = () => {
         const amountNio = Number(vals.nio) || 0;
         const amountUsd = Number(vals.usd) || 0;
         const existing = gradePrices.find((p) => p.grade_id === g.id);
+        const now = new Date().toISOString();
+
+        const newSchemaPayload = {
+          monthly_amount: amountNio,
+          monthly_amount_usd: amountUsd,
+          currency: "NIO",
+          updated_at: now,
+        };
+
+        const oldSchemaPayload = {
+          amount_nio: amountNio,
+          amount_usd: amountUsd,
+          updated_at: now,
+        };
+
         if (existing) {
-          await supabase
+          const { error: updateNewSchemaErr } = await supabase
             .from("grade_prices")
-            .update({ amount_nio: amountNio, amount_usd: amountUsd, updated_at: new Date().toISOString() })
+            .update(newSchemaPayload)
             .eq("id", existing.id);
+
+          if (updateNewSchemaErr) {
+            const { error: updateOldSchemaErr } = await supabase
+              .from("grade_prices")
+              .update(oldSchemaPayload)
+              .eq("id", existing.id);
+
+            if (updateOldSchemaErr) throw updateOldSchemaErr;
+          }
         } else {
-          await supabase.from("grade_prices").insert({ grade_id: g.id, amount_nio: amountNio, amount_usd: amountUsd });
+          const { error: insertNewSchemaErr } = await supabase
+            .from("grade_prices")
+            .insert({
+              grade_id: g.id,
+              ...newSchemaPayload,
+            });
+
+          if (insertNewSchemaErr) {
+            const { error: insertOldSchemaErr } = await supabase
+              .from("grade_prices")
+              .insert({
+                grade_id: g.id,
+                ...oldSchemaPayload,
+              });
+
+            if (insertOldSchemaErr) throw insertOldSchemaErr;
+          }
         }
       }
       const payload: Partial<SettingsRow> = {
@@ -244,11 +307,25 @@ const Configuracion = () => {
       }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config-settings", "grade-prices"] });
+      qc.invalidateQueries({ queryKey: ["config-settings"] });
+      qc.invalidateQueries({ queryKey: ["grade-prices"] });
       toast.success("Precios guardados");
     },
     onError: (e: Error) => toast.error(e.message || "Error al guardar precios"),
   });
+
+  const rate = Number(exchangeRate) > 0 ? Number(exchangeRate) : DEFAULT_EXCHANGE_RATE;
+  const format2 = (n: number) => Number(n.toFixed(2));
+
+  const applyToAllGrades = (nio: number, usd: number) => {
+    setPreciosByGrade((prev) => {
+      const next = { ...prev };
+      grades.forEach((g) => {
+        next[g.id] = { nio: String(nio), usd: String(usd) };
+      });
+      return next;
+    });
+  };
 
   const createOrUpdateUser = useMutation({
     mutationFn: async () => {
@@ -661,7 +738,7 @@ const Configuracion = () => {
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">Mensualidades</CardTitle>
-                <CardDescription>Montos mensuales por grado (C$ y USD)</CardDescription>
+                <CardDescription>Montos mensuales por grado (C$ y USD) según tipo de cambio</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {loadingGrades || loadingPrices ? (
@@ -670,6 +747,32 @@ const Configuracion = () => {
                   <p className="text-sm text-muted-foreground">No hay grados. Cree grados en la base de datos (preescolar a 11°).</p>
                 ) : (
                   <>
+                    <div className="rounded-lg border p-3 bg-muted/20 space-y-3">
+                      <div className="flex flex-wrap items-end gap-3">
+                        <div>
+                          <Label className="input-label">Tipo de cambio (C$ por USD)</Label>
+                          <Input
+                            type="number"
+                            min={0.01}
+                            step={0.01}
+                            className="w-36"
+                            value={exchangeRate}
+                            onChange={(e) => setExchangeRate(e.target.value)}
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => applyToAllGrades(DEFAULT_MONTHLY_NIO, DEFAULT_MONTHLY_USD)}
+                        >
+                          Aplicar 770 C$ / 21 $
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Si editas C$, el valor en USD se recalcula automáticamente. Si editas USD, se recalcula C$.
+                      </p>
+                    </div>
+
                     {grades.map((g) => (
                       <div key={g.id} className="flex items-center justify-between gap-4 flex-wrap">
                         <span className="text-sm font-medium min-w-[120px]">{g.name}</span>
@@ -681,12 +784,18 @@ const Configuracion = () => {
                             step={1}
                             className="w-24 text-right"
                             value={preciosByGrade[g.id]?.nio ?? ""}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              const nioRaw = e.target.value;
+                              const nio = Number(nioRaw);
                               setPreciosByGrade((prev) => ({
                                 ...prev,
-                                [g.id]: { ...(prev[g.id] ?? { nio: "", usd: "" }), nio: e.target.value },
-                              }))
-                            }
+                                [g.id]: {
+                                  ...(prev[g.id] ?? { nio: "", usd: "" }),
+                                  nio: nioRaw,
+                                  usd: Number.isFinite(nio) && nio > 0 ? String(format2(nio / rate)) : "",
+                                },
+                              }));
+                            }}
                           />
                         </div>
                         <div className="flex items-center gap-2">
@@ -697,12 +806,18 @@ const Configuracion = () => {
                             step={0.01}
                             className="w-24 text-right"
                             value={preciosByGrade[g.id]?.usd ?? ""}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              const usdRaw = e.target.value;
+                              const usd = Number(usdRaw);
                               setPreciosByGrade((prev) => ({
                                 ...prev,
-                                [g.id]: { ...(prev[g.id] ?? { nio: "", usd: "" }), usd: e.target.value },
-                              }))
-                            }
+                                [g.id]: {
+                                  ...(prev[g.id] ?? { nio: "", usd: "" }),
+                                  usd: usdRaw,
+                                  nio: Number.isFinite(usd) && usd > 0 ? String(format2(usd * rate)) : "",
+                                },
+                              }));
+                            }}
                           />
                         </div>
                       </div>

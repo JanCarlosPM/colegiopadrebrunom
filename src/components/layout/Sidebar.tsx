@@ -13,6 +13,7 @@ import {
   LogOut,
   History,
   Package,
+  FileUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
@@ -23,6 +24,7 @@ const navigation = [
   { name: "Matrículas", href: "/matriculas", icon: GraduationCap },
   { name: "Mensualidades", href: "/pagos", icon: CreditCard },
   { name: "Otros Cobros", href: "/otros-cobros", icon: Package },
+  { name: "Importaciones", href: "/importaciones", icon: FileUp },
   { name: "Historial", href: "/historial", icon: History },
   { name: "Reportes", href: "/reportes", icon: FileText },
   { name: "Configuración", href: "/configuracion", icon: Settings },

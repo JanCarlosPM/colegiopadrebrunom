@@ -390,6 +390,7 @@ export default function Matriculas() {
             currency === "NIO" ? Number(paid).toFixed(2) : "",
           montoDolares:
             currency === "USD" ? Number(paid).toFixed(2) : "",
+          sumaDe: `${currency === "USD" ? "$" : "C$"} ${Number(result.montoAplicado || 0).toFixed(2)}`,
           concepto: "Pago de matrícula",
         });
       }, 300);
@@ -825,6 +826,7 @@ export default function Matriculas() {
                         p.currency === "USD"
                           ? Number(p.received_amount || 0).toFixed(2)
                           : "",
+                      sumaDe: `${p.currency === "USD" ? "$" : "C$"} ${Number(p.amount || 0).toFixed(2)}`,
                       concepto: "Pago de matrícula",
                     })
                   }

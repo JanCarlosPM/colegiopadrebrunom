@@ -31,45 +31,7 @@ import {
 } from "@/lib/billing";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { FormField } from "@/components/common/FormField";
-
-/* ================= RECIBO ================= */
-
-function imprimirRecibo(data: any) {
-  const win = window.open("", "", "width=800,height=600");
-  if (!win) {
-    toast.error("No se pudo abrir el recibo. Habilita pop-ups en tu navegador.");
-    return;
-  }
-
-  win.document.write(`
-    <html>
-      <head>
-        <title>Recibo Mensualidad</title>
-        <style>
-          body { font-family: Arial; font-size: 12px; padding: 20px; }
-          h2 { text-align: center; }
-          hr { margin: 10px 0; }
-        </style>
-      </head>
-      <body onload="window.print(); window.close();">
-        <h2>Colegio Padre Bruno Martínez</h2>
-        <p><strong>Fecha:</strong> ${data.fecha}</p>
-        <p><strong>Estudiante:</strong> ${data.estudiante}</p>
-        <hr />
-        <p><strong>Concepto:</strong> Mensualidad</p>
-        <p><strong>Mes:</strong> ${data.mes}</p>
-        <p><strong>Total:</strong> ${data.moneda} ${data.total}</p>
-        <p><strong>Aplicado:</strong> ${data.moneda} ${data.aplicado}</p>
-        <p><strong>Recibido:</strong> ${data.moneda} ${data.recibido}</p>
-        <p><strong>Cambio:</strong> ${data.moneda} ${data.cambio}</p>
-        <hr />
-        ___________________________<br/>Firma
-      </body>
-    </html>
-  `);
-
-  win.document.close();
-}
+import { imprimirReciboOficial } from "@/utils/imprimirReciboMatricula";
 
 /* ================= FETCHERS ================= */
 
@@ -462,14 +424,16 @@ export default function Pagos() {
 
       setOpen(false);
 
-      imprimirRecibo({
+      imprimirReciboOficial({
+        numero: String(Date.now()).slice(-5),
         estudiante: search,
-        mes: MONTHS_ES[(chargeMonth ?? 1) - 1],
-        total: Number(totalInPayCurrency || 0).toFixed(2),
-        aplicado: Number(appliedInPayCurrency || 0).toFixed(2),
-        recibido: recibidoNum.toFixed(2),
-        cambio: Number(cambio || 0).toFixed(2),
-        moneda: simboloPago,
+        grado: selectedStudent?.grades?.name ?? "",
+        anio: String(year),
+        nivel: selectedStudent?.sections?.name ?? "",
+        montoCordobas: payCurrency === "NIO" ? Number(recibidoNum || 0).toFixed(2) : "",
+        montoDolares: payCurrency === "USD" ? Number(recibidoNum || 0).toFixed(2) : "",
+        sumaDe: `${simboloPago} ${Number(appliedInPayCurrency || 0).toFixed(2)}`,
+        concepto: `Mensualidad ${MONTHS_ES[(chargeMonth ?? 1) - 1]}`,
         fecha: new Date(paidAt).toLocaleString("es-NI", {
           timeZone: "America/Managua",
         }),
@@ -896,14 +860,16 @@ export default function Pagos() {
                     size="icon"
                     variant="outline"
                     onClick={() =>
-                      imprimirRecibo({
+                      imprimirReciboOficial({
+                        numero: String(p.id).slice(-5),
                         estudiante: p.students?.full_name,
-                        mes: MONTHS_ES[p.month - 1] ?? p.month,
-                        total: Number(p.amount || 0).toFixed(2),
-                        aplicado: Number(p.amount || 0).toFixed(2),
-                        recibido: Number(p.received_amount || 0).toFixed(2),
-                        cambio: Number(p.change_amount || 0).toFixed(2),
-                        moneda: simbolo,
+                        grado: p.students?.grades?.name ?? "",
+                        anio: String(year),
+                        nivel: p.students?.sections?.name ?? "",
+                        montoCordobas: p.currency === "NIO" ? Number(p.received_amount || 0).toFixed(2) : "",
+                        montoDolares: p.currency === "USD" ? Number(p.received_amount || 0).toFixed(2) : "",
+                        sumaDe: `${simbolo} ${Number(p.amount || 0).toFixed(2)}`,
+                        concepto: `Mensualidad ${MONTHS_ES[p.month - 1] ?? p.month}`,
                         fecha: new Date(p.paid_at).toLocaleString("es-NI", {
                           timeZone: "America/Managua",
                         }),

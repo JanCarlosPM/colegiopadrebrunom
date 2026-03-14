@@ -11,13 +11,28 @@ export default function ProtectedRoute({ children }: Props) {
   const [session, setSession] = useState<any>(null);
 
   useEffect(() => {
+    const isExpired = (s: any) => {
+      const expiresAt = Number(s?.expires_at ?? 0);
+      if (!expiresAt) return false;
+      // margen de seguridad de 10 segundos
+      return expiresAt <= Math.floor(Date.now() / 1000) + 10;
+    };
+
     supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
+      if (isExpired(data.session)) {
+        setSession(null);
+      } else {
+        setSession(data.session);
+      }
       setLoading(false);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
+        if (isExpired(session)) {
+          setSession(null);
+          return;
+        }
         setSession(session);
       }
     );
@@ -27,7 +42,13 @@ export default function ProtectedRoute({ children }: Props) {
     };
   }, []);
 
-  if (loading) return null;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-sm text-muted-foreground">
+        Verificando sesión...
+      </div>
+    );
+  }
 
   if (!session) {
     return <Navigate to="/login" replace />;

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,7 @@ import {
 import { Plus, Printer, Search } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 /* ================= RECIBO ================= */
 
@@ -139,13 +140,15 @@ const fetchStudentOpenCharges = async (studentId: string, year: number) => {
       currency,
       academic_year,
       concept,
-      status
+      status,
+      created_at
     `)
     .eq("student_id", studentId)
     .eq("academic_year", year)
     .eq("concept", "MENSUALIDAD")
     .in("status", ["PENDIENTE", "PARCIAL"])
-    .order("month", { ascending: true });
+    .order("month", { ascending: true })
+    .order("created_at", { ascending: false });
 
   if (error) throw error;
   return data ?? [];
@@ -187,6 +190,23 @@ export default function Pagos() {
     pay_currency: "USD",
   });
 
+  useEffect(() => {
+    if (defaultAcademicYear) {
+      setYear(Number(defaultAcademicYear));
+    }
+  }, [defaultAcademicYear]);
+
+  const resetPaymentForm = () => {
+    setForm({
+      student_id: "",
+      charge_id: "",
+      recibido: "",
+      pay_currency: "USD",
+    });
+    setSearch("");
+    setStudentCharges([]);
+  };
+
   const selectedCharge = studentCharges.find(
     (c: any) => c.id === form.charge_id
   );
@@ -227,26 +247,7 @@ export default function Pagos() {
   const simboloCargo = chargeCurrency === "USD" ? "$" : "C$";
   const loadStudentOpenCharges = async (studentId: string) => {
     try {
-      const { data, error } = await supabase
-        .from("charges")
-        .select(`
-        id,
-        student_id,
-        month,
-        amount,
-        paid_amount,
-        currency,
-        academic_year,
-        concept,
-        status
-      `)
-        .eq("student_id", studentId)
-        .eq("academic_year", year)
-        .eq("concept", "MENSUALIDAD")
-        .order("month", { ascending: true })
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
+      const data = await fetchStudentOpenCharges(studentId, year);
 
       const byMonth = new Map<number, any>();
 
@@ -254,35 +255,27 @@ export default function Pagos() {
         if (!charge.month) continue;
 
         const existing = byMonth.get(charge.month);
-
-        // Si ya existe un PAGADO para ese mes, nunca mostrar más ese mes
-        if (existing?.status === "PAGADO") continue;
-
-        // Si este es PAGADO, reemplaza cualquiera
-        if (charge.status === "PAGADO") {
-          byMonth.set(charge.month, charge);
-          continue;
-        }
-
-        // Si no existe aún, guardar el primero
         if (!existing) {
           byMonth.set(charge.month, charge);
-          continue;
-        }
-
-        // Si el existente es PENDIENTE y este es PARCIAL, preferir PARCIAL
-        if (existing.status === "PENDIENTE" && charge.status === "PARCIAL") {
+        } else if (
+          existing.status === "PENDIENTE" &&
+          charge.status === "PARCIAL"
+        ) {
           byMonth.set(charge.month, charge);
         }
       }
 
       const visibles = Array.from(byMonth.values())
-        .filter((c: any) => c.status === "PENDIENTE" || c.status === "PARCIAL")
+        .filter((c: any) => {
+          const saldo = Number(c.amount || 0) - Number(c.paid_amount || 0);
+          return (c.status === "PENDIENTE" || c.status === "PARCIAL") && saldo > 0;
+        })
         .sort((a: any, b: any) => a.month - b.month);
 
       setStudentCharges(visibles);
     } catch (error) {
       console.error("Error cargando mensualidades del estudiante:", error);
+      toast.error("No se pudieron cargar las mensualidades pendientes.");
       setStudentCharges([]);
     }
   };
@@ -333,13 +326,10 @@ export default function Pagos() {
 
       if (chargeErr) throw chargeErr;
 
-      return {
-        paidAt,
-        newStatus,
-      };
+      return { paidAt };
     },
 
-    onSuccess: async ({ paidAt, newStatus }) => {
+    onSuccess: async ({ paidAt }) => {
       await qc.invalidateQueries({ queryKey: ["payments", year] });
       await qc.invalidateQueries({ queryKey: ["dashboard"] });
 
@@ -362,25 +352,19 @@ export default function Pagos() {
         }),
       });
 
-      setForm({
-        student_id: "",
-        charge_id: "",
-        recibido: "",
-        pay_currency: "USD",
-      });
-      setSearch("");
-      setStudentCharges([]);
+      resetPaymentForm();
+      toast.success("Pago registrado correctamente.");
     },
 
     onError: (err: any) => {
       console.error("Error registrando pago:", err);
 
       if (err.message === "MONTO_INVALIDO") {
-        alert("El monto recibido no es válido.");
+        toast.error("El monto recibido no es válido.");
         return;
       }
 
-      alert("No se pudo registrar el pago.");
+      toast.error("No se pudo registrar el pago.");
     },
   });
 
@@ -391,7 +375,15 @@ export default function Pagos() {
     return text.includes(tableSearch.toLowerCase());
   });
 
-  const yearOptions = Array.from({ length: 6 }).map((_, i) => currentYear - i);
+  const searchInDialog = search.toLowerCase().trim();
+  const filteredStudents = students.filter((s: any) => {
+    const text = `${s.full_name ?? ""} ${s.grades?.name ?? ""} ${s.sections?.name ?? ""}`
+      .toLowerCase();
+    return text.includes(searchInDialog);
+  });
+
+  const yearBase = Number(defaultAcademicYear ?? currentYear);
+  const yearOptions = Array.from({ length: 8 }).map((_, i) => yearBase - i);
 
   return (
     <DashboardLayout
@@ -430,14 +422,7 @@ export default function Pagos() {
           onOpenChange={(value) => {
             setOpen(value);
             if (!value) {
-              setForm({
-                student_id: "",
-                charge_id: "",
-                recibido: "",
-                pay_currency: "USD",
-              });
-              setSearch("");
-              setStudentCharges([]);
+              resetPaymentForm();
             }
           }}
         >
@@ -467,11 +452,7 @@ export default function Pagos() {
 
                 {search && (
                   <div className="border rounded max-h-40 overflow-y-auto mt-2">
-                    {students
-                      .filter((s: any) =>
-                        s.full_name.toLowerCase().includes(search.toLowerCase())
-                      )
-                      .map((s: any) => (
+                    {filteredStudents.map((s: any) => (
                         <div
                           key={s.id}
                           className="p-3 hover:bg-muted cursor-pointer border-b last:border-b-0"
@@ -488,7 +469,7 @@ export default function Pagos() {
                         >
                           <p className="font-medium">{s.full_name}</p>
                           <p className="text-xs text-muted-foreground">
-                            {s.grades?.name} {s.sections?.name}
+                            {s.grades?.name ?? "Sin grado"} {s.sections?.name ?? ""}
                           </p>
                         </div>
                       ))}
@@ -583,18 +564,13 @@ export default function Pagos() {
                             Recibido
                           </label>
                           <Input
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            maxLength={payCurrency === "USD" ? 3 : 4}
+                            inputMode="decimal"
+                            pattern="^[0-9]*([.,][0-9]{0,2})?$"
                             value={String(form.recibido ?? "")}
                             onChange={(e) => {
-                              const onlyDigits = e.target.value.replace(/\D/g, "");
-                              const limited =
-                                payCurrency === "USD"
-                                  ? onlyDigits.slice(0, 3)
-                                  : onlyDigits.slice(0, 4);
-
-                              setForm({ ...form, recibido: limited });
+                              const raw = e.target.value.replace(",", ".");
+                              if (!/^\d*\.?\d{0,2}$/.test(raw)) return;
+                              setForm({ ...form, recibido: raw });
                             }}
                           />
                         </div>

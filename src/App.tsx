@@ -10,6 +10,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Estudiantes = lazy(() => import("./pages/Estudiantes"));
 const Matriculas = lazy(() => import("./pages/Matriculas"));
 const Pagos = lazy(() => import("./pages/Pagos"));
+const OtrosCobros = lazy(() => import("./pages/OtrosCobros"));
 const Historial = lazy(() => import("./pages/Historial"));
 const Reportes = lazy(() => import("./pages/Reportes"));
 const Configuracion = lazy(() => import("./pages/Configuracion"));
@@ -67,6 +68,15 @@ const App = () => {
               element={
                 <ProtectedRoute>
                   <Pagos />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/otros-cobros"
+              element={
+                <ProtectedRoute>
+                  <OtrosCobros />
                 </ProtectedRoute>
               }
             />

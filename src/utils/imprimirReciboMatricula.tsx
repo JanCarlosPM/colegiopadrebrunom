@@ -28,15 +28,15 @@ function ReciboOficialTemplate({
 }: ReciboOficialData) {
   const pos = {
     numero: { top: "9.5%", left: "86.2%" },
-    grado: { top: "57.5%", left: "8.5%" }, // 1
-    anio: { top: "57.5%", left: "38.5%" }, // 2
-    nivel: { top: "57.5%", left: "62.5%" }, // 3
-    fecha: { top: "68.5%", left: "8.5%" }, // 4
-    cordobas: { top: "68.5%", left: "75.5%" }, // 5
-    dolares: { top: "76.5%", left: "75.5%" }, // 6
-    recibimosDe: { top: "76.5%", left: "18%" }, // 7
-    sumaDe: { top: "84%", left: "14.5%" }, // 8
-    concepto: { top: "91.5%", left: "18.8%" }, // 9
+    grado: { top: "49.5%", left: "8.5%" }, // 1
+    anio: { top: "49.5%", left: "38.5%" }, // 2
+    nivel: { top: "49.5%", left: "62.5%" }, // 3
+    fecha: { top: "57.5%", left: "8.5%" }, // 4
+    cordobas: { top: "57.5%", left: "75.5%" }, // 5
+    dolares: { top: "64.5%", left: "75.5%" }, // 6
+    recibimosDe: { top: "64.5%", left: "18%" }, // 7
+    sumaDe: { top: "72.5%", left: "14.5%" }, // 8
+    concepto: { top: "79.5%", left: "18.8%" }, // 9
   } as const;
 
   return (

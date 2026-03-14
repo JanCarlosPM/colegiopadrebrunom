@@ -435,37 +435,37 @@ export default function Matriculas() {
             </Button>
           </DialogTrigger>
 
-          <DialogContent className="max-w-xl">
+          <DialogContent className="max-w-lg w-[95vw] max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Pago de Matrícula</DialogTitle>
               <DialogDescription>
-                Flujo simple: elige estudiante, confirma moneda y registra el pago.
+                Elige estudiante, moneda y registra el pago.
               </DialogDescription>
             </DialogHeader>
 
             {/* ESTUDIANTE */}
-            <div className="rounded-lg border p-4 bg-muted/20">
-              <label className="text-base font-semibold block mb-2">Paso 1: Seleccionar estudiante</label>
-              <p className="text-sm text-muted-foreground mb-3">Escribe el nombre y selecciona una opción.</p>
+            <div>
+              <label className="text-sm font-semibold block mb-2">Estudiante</label>
+              <p className="text-xs text-muted-foreground mb-2">Busca y selecciona un estudiante.</p>
               <label className="text-sm font-medium">Estudiante</label>
               <Input
                 placeholder="Buscar estudiante..."
-                className="h-12 text-base mt-2"
+                className="h-10 text-sm mt-2"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
 
               {search && (
-                <div className="border rounded max-h-48 overflow-y-auto mt-2 bg-background">
+                <div className="border rounded max-h-40 overflow-y-auto mt-2 bg-background">
                   {filteredStudents.length === 0 && (
-                    <p className="p-4 text-sm text-muted-foreground">
+                    <p className="p-3 text-sm text-muted-foreground">
                       No se encontraron estudiantes con esa búsqueda.
                     </p>
                   )}
                   {filteredStudents.map((s: any) => (
                     <div
                       key={s.id}
-                      className="p-4 hover:bg-muted cursor-pointer flex gap-2 border-b last:border-b-0"
+                      className="p-3 hover:bg-muted cursor-pointer flex gap-2 border-b last:border-b-0"
                       onClick={async () => {
                         const { data: existing } = await supabase
                           .from("enrollments")
@@ -499,8 +499,8 @@ export default function Matriculas() {
                     >
                       <User className="h-4 w-4 mt-1" />
                       <div>
-                        <p className="font-semibold text-base">{s.full_name}</p>
-                        <p className="text-sm text-muted-foreground">
+                        <p className="font-medium text-sm">{s.full_name}</p>
+                        <p className="text-xs text-muted-foreground">
                           {s.grades?.name}{" "}
                           {s.sections?.name ? `- ${s.sections?.name}` : ""}
                         </p>
@@ -511,15 +511,15 @@ export default function Matriculas() {
               )}
 
               {selectedStudent && (
-                <div className="mt-3 rounded-md border bg-background p-3 flex items-center justify-between gap-2">
+                <div className="mt-3 rounded-md border bg-background p-2.5 flex items-center justify-between gap-2">
                   <div>
-                    <p className="text-sm text-muted-foreground">Seleccionado</p>
-                    <p className="font-semibold">{selectedStudent.full_name}</p>
+                    <p className="text-xs text-muted-foreground">Seleccionado</p>
+                    <p className="font-medium text-sm">{selectedStudent.full_name}</p>
                   </div>
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-10"
+                    className="h-9 text-xs"
                     onClick={() => {
                       setSelectedStudent(null);
                       setSearch("");
@@ -541,18 +541,16 @@ export default function Matriculas() {
             )}
 
             {/* TOTAL + MONEDA */}
-            <div className="rounded-lg border p-4 space-y-4 mt-4">
-              <h4 className="text-base font-semibold">Paso 2: Confirmar matrícula y moneda</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
               <div>
-                <label className="text-sm font-medium">Total matrícula</label>
-                <Input className="h-12 text-base" type="text" value={formatMoney(saldoPendiente, currency)} disabled />
+                <label className="text-sm font-medium">Saldo matrícula</label>
+                <Input className="h-10 text-sm" type="text" value={formatMoney(saldoPendiente, currency)} disabled />
               </div>
 
               <div>
                 <label className="text-sm font-medium">Moneda</label>
                 <select
-                  className="w-full border rounded px-3 py-2 h-12 text-base"
+                  className="w-full border rounded px-3 py-2 h-10 text-sm"
                   value={currency}
                   onChange={(e) => {
                     const v = e.target.value as "NIO" | "USD";
@@ -585,12 +583,10 @@ export default function Matriculas() {
                 </select>
               </div>
             </div>
-            </div>
 
             {/* RECIBIDO + CAMBIO */}
-            <div className="rounded-lg border p-4 space-y-4 mt-4">
-              <h4 className="text-base font-semibold">Paso 3: Registrar pago</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-3 mt-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <FormField
                 label="Dinero recibido"
                 hint={`Máximo ${currency === "USD" ? "3" : "4"} cifras (${currency === "USD" ? "999.99" : "9999.99"}).`}
@@ -598,7 +594,7 @@ export default function Matriculas() {
               >
                 <Input
                   inputMode="decimal"
-                  className="h-12 text-base"
+                  className="h-10 text-sm"
                   value={recibidoInput}
                   onChange={(e) => {
                     const raw = e.target.value.replace(",", ".");
@@ -616,7 +612,7 @@ export default function Matriculas() {
                 <label className="text-sm font-medium">Cambio</label>
                 <Input
                   disabled
-                  className="h-12 text-base"
+                  className="h-10 text-sm"
                   value={formatMoney(cambio, currency)}
                 />
               </div>
@@ -625,7 +621,7 @@ export default function Matriculas() {
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-11 text-sm"
+                  className="h-9 text-xs"
                   onClick={() => {
                     const exacto = Number(saldoPendiente.toFixed(2));
                     setRecibidoInput(exacto.toString());
@@ -637,7 +633,7 @@ export default function Matriculas() {
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-11 text-sm"
+                  className="h-9 text-xs"
                   onClick={() => {
                     const mitad = Number((saldoPendiente / 2).toFixed(2));
                     setRecibidoInput(mitad.toString());
@@ -649,7 +645,7 @@ export default function Matriculas() {
                 <Button
                   type="button"
                   variant="ghost"
-                  className="h-11 text-sm"
+                  className="h-9 text-xs"
                   onClick={() => {
                     setRecibidoInput("");
                     setPaid(0);
@@ -662,7 +658,7 @@ export default function Matriculas() {
 
             {/* BOTÓN */}
             <Button
-              className="w-full mt-6 h-12 text-base font-semibold"
+              className="w-full mt-4 h-10 text-sm font-semibold"
               disabled={!selectedStudent || !isPaidValid || saldoPendiente === 0}
               onClick={() => createEnrollment.mutate()}
             >

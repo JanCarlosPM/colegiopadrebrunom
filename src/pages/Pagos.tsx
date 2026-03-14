@@ -573,44 +573,41 @@ export default function Pagos() {
             </Button>
           </DialogTrigger>
 
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-lg w-[95vw] max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Pago de Mensualidad</DialogTitle>
               <DialogDescription>
-                Flujo simple: elige estudiante, confirma el mes y registra el cobro.
+                Elige estudiante, mes, moneda y registra el pago.
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-5 mt-2">
+            <div className="space-y-4 mt-2">
               {/* BÚSQUEDA ESTUDIANTE */}
-              <div className="rounded-lg border p-4 bg-muted/20">
-                <label className="text-base font-semibold block mb-2">
-                  Paso 1: Seleccionar estudiante
-                </label>
-                <p className="text-sm text-muted-foreground mb-3">
-                  Escribe el nombre y toca al estudiante.
-                </p>
-                <label className="text-sm font-medium block mb-2">
+              <div>
+                <label className="text-sm font-semibold block mb-2">
                   Estudiante
+                </label>
+                <label className="text-sm font-medium block mb-2">
+                  Buscar por nombre
                 </label>
                 <Input
                   placeholder="Buscar estudiante..."
                   value={search}
-                  className="h-12 text-base"
+                  className="h-10 text-sm"
                   onChange={(e) => setSearch(e.target.value)}
                 />
 
                 {search && (
-                  <div className="border rounded max-h-48 overflow-y-auto mt-2 bg-background">
+                  <div className="border rounded max-h-40 overflow-y-auto mt-2 bg-background">
                     {filteredStudents.length === 0 && (
-                      <p className="p-4 text-sm text-muted-foreground">
+                      <p className="p-3 text-sm text-muted-foreground">
                         No se encontraron estudiantes con esa búsqueda.
                       </p>
                     )}
                     {filteredStudents.map((s: any) => (
                         <div
                           key={s.id}
-                          className="p-4 hover:bg-muted cursor-pointer border-b last:border-b-0"
+                          className="p-3 hover:bg-muted cursor-pointer border-b last:border-b-0"
                           onClick={async () => {
                             setForm({
                               student_id: s.id,
@@ -622,8 +619,8 @@ export default function Pagos() {
                             await loadStudentOpenCharges(s.id);
                           }}
                         >
-                          <p className="font-semibold text-base">{s.full_name}</p>
-                          <p className="text-sm text-muted-foreground">
+                          <p className="font-medium text-sm">{s.full_name}</p>
+                          <p className="text-xs text-muted-foreground">
                             {s.grades?.name ?? "Sin grado"} {s.sections?.name ?? ""}
                           </p>
                         </div>
@@ -632,15 +629,15 @@ export default function Pagos() {
                 )}
 
                 {selectedStudent && (
-                  <div className="mt-3 rounded-md border bg-background p-3 flex items-center justify-between gap-2">
+                  <div className="mt-3 rounded-md border bg-background p-2.5 flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-sm text-muted-foreground">Seleccionado</p>
-                      <p className="font-semibold">{selectedStudent.full_name}</p>
+                      <p className="text-xs text-muted-foreground">Seleccionado</p>
+                      <p className="font-medium text-sm">{selectedStudent.full_name}</p>
                     </div>
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-10"
+                      className="h-9 text-xs"
                       onClick={resetPaymentForm}
                     >
                       Cambiar
@@ -652,10 +649,7 @@ export default function Pagos() {
               {/* CARGO */}
               {form.student_id && (
                 <>
-                  <div className="rounded-lg border p-4">
-                    <label className="text-base font-semibold block mb-2">
-                      Paso 2: Confirmar mensualidad
-                    </label>
+                  <div>
                     <label className="text-sm font-medium block mb-2">
                       Mes pendiente
                     </label>
@@ -666,7 +660,7 @@ export default function Pagos() {
                       </p>
                     ) : (
                       <select
-                        className="w-full border rounded px-3 py-2 h-12 text-base"
+                        className="w-full border rounded px-3 py-2 h-10 text-sm"
                         value={form.charge_id}
                         onChange={(e) =>
                           setForm({
@@ -692,36 +686,34 @@ export default function Pagos() {
                   {/* RESUMEN */}
                   {selectedCharge && (
                     <>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 rounded-lg border p-4 bg-muted/20">
+                      <div className="grid grid-cols-2 gap-3 rounded-md border p-3 bg-muted/20">
                         <div>
                           <p className="text-xs text-muted-foreground">Total del cargo</p>
-                          <p className="font-semibold text-lg">
+                          <p className="font-semibold text-sm">
                             {formatMoney(totalOriginal, chargeCurrency)}
                           </p>
                         </div>
                         <div>
                           <p className="text-xs text-muted-foreground">Abonado</p>
-                          <p className="font-semibold text-lg">
+                          <p className="font-semibold text-sm">
                             {formatMoney(paidSoFar, chargeCurrency)}
                           </p>
                         </div>
-                        <div>
+                        <div className="col-span-2">
                           <p className="text-xs text-muted-foreground">Saldo pendiente</p>
-                          <p className="font-semibold text-lg">
+                          <p className="font-semibold text-sm">
                             {formatMoney(remainingInPayCurrency, payCurrency)}
                           </p>
                         </div>
                       </div>
 
-                      <div className="rounded-lg border p-4 space-y-4">
-                        <h4 className="text-base font-semibold">Paso 3: Registrar cobro</h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="text-sm font-medium block mb-2">
                             Moneda de pago
                           </label>
                           <select
-                            className="w-full border rounded px-3 py-2 h-12 text-base"
+                            className="w-full border rounded px-3 py-2 h-10 text-sm"
                             value={form.pay_currency}
                             onChange={(e) =>
                               setForm({
@@ -743,7 +735,7 @@ export default function Pagos() {
                           <Input
                             inputMode="decimal"
                             pattern="^[0-9]*([.,][0-9]{0,2})?$"
-                            className="h-12 text-base"
+                            className="h-10 text-sm"
                             value={String(form.recibido ?? "")}
                             onChange={(e) => {
                               const raw = e.target.value.replace(",", ".");
@@ -761,7 +753,7 @@ export default function Pagos() {
                         <Button
                           type="button"
                           variant="outline"
-                          className="h-11 text-sm"
+                          className="h-9 text-xs"
                           onClick={() =>
                             setForm({
                               ...form,
@@ -774,7 +766,7 @@ export default function Pagos() {
                         <Button
                           type="button"
                           variant="outline"
-                          className="h-11 text-sm"
+                          className="h-9 text-xs"
                           onClick={() =>
                             setForm({
                               ...form,
@@ -787,7 +779,7 @@ export default function Pagos() {
                         <Button
                           type="button"
                           variant="ghost"
-                          className="h-11 text-sm"
+                          className="h-9 text-xs"
                           onClick={() => setForm({ ...form, recibido: "" })}
                         >
                           Limpiar
@@ -801,7 +793,7 @@ export default function Pagos() {
                           </label>
                           <Input
                             disabled
-                            className="h-12 text-base"
+                            className="h-10 text-sm"
                             value={formatMoney(amountAppliedInPayCurrency, payCurrency)}
                           />
                         </div>
@@ -812,7 +804,7 @@ export default function Pagos() {
                           </label>
                           <Input
                             disabled
-                            className="h-12 text-base"
+                            className="h-10 text-sm"
                             value={formatMoney(cambio, payCurrency)}
                           />
                         </div>
@@ -823,7 +815,7 @@ export default function Pagos() {
                       </div>
 
                       <Button
-                        className="w-full h-12 text-base font-semibold"
+                        className="w-full h-10 text-sm font-semibold"
                         disabled={
                           !form.charge_id ||
                           !isRecibidoValid ||
@@ -833,7 +825,6 @@ export default function Pagos() {
                       >
                         {createPayment.isPending ? "Registrando..." : "Registrar Pago"}
                       </Button>
-                      </div>
                     </>
                   )}
                 </>

@@ -116,6 +116,7 @@ const fetchStudents = async () => {
     .from("students")
     .select(`
       id,
+      grade_id,
       full_name,
       status,
       grades ( name ),
@@ -126,6 +127,18 @@ const fetchStudents = async () => {
 
   if (error) throw error;
   return data ?? [];
+};
+
+const fetchGradePrice = async (gradeId: string) => {
+  if (!gradeId) return null;
+  const { data, error } = await supabase
+    .from("grade_prices")
+    .select("monthly_amount, monthly_amount_usd")
+    .eq("grade_id", gradeId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
 };
 
 const fetchStudentOpenCharges = async (studentId: string, year: number) => {
@@ -190,6 +203,26 @@ export default function Pagos() {
     pay_currency: "USD",
   });
 
+  const selectedStudent = useMemo(
+    () => students.find((s: any) => s.id === form.student_id),
+    [students, form.student_id]
+  );
+
+  const { data: selectedGradePrice } = useQuery({
+    queryKey: ["grade-price", selectedStudent?.grade_id],
+    queryFn: () => fetchGradePrice(selectedStudent?.grade_id),
+    enabled: !!selectedStudent?.grade_id,
+  });
+
+  const dynamicRate = useMemo(() => {
+    const nio = Number(selectedGradePrice?.monthly_amount ?? 0);
+    const usd = Number(selectedGradePrice?.monthly_amount_usd ?? 0);
+    if (nio > 0 && usd > 0) {
+      return nio / usd;
+    }
+    return RATE_USD_TO_NIO;
+  }, [selectedGradePrice]);
+
   useEffect(() => {
     if (defaultAcademicYear) {
       setYear(Number(defaultAcademicYear));
@@ -223,8 +256,8 @@ export default function Pagos() {
     chargeCurrency === payCurrency
       ? remainingInChargeCurrency
       : chargeCurrency === "USD" && payCurrency === "NIO"
-        ? remainingInChargeCurrency * RATE_USD_TO_NIO
-        : remainingInChargeCurrency / RATE_USD_TO_NIO;
+        ? remainingInChargeCurrency * dynamicRate
+        : remainingInChargeCurrency / dynamicRate;
 
   const amountAppliedInPayCurrency = Math.min(
     recibidoNum,
@@ -235,8 +268,8 @@ export default function Pagos() {
     chargeCurrency === payCurrency
       ? amountAppliedInPayCurrency
       : chargeCurrency === "USD" && payCurrency === "NIO"
-        ? amountAppliedInPayCurrency / RATE_USD_TO_NIO
-        : amountAppliedInPayCurrency * RATE_USD_TO_NIO;
+        ? amountAppliedInPayCurrency / dynamicRate
+        : amountAppliedInPayCurrency * dynamicRate;
 
   const cambio =
     recibidoNum > amountAppliedInPayCurrency

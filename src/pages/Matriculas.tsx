@@ -97,6 +97,25 @@ const fetchData = async (year: number) => {
 export default function Matriculas() {
   const qc = useQueryClient();
 
+  const { data: matriculaSettings } = useQuery({
+    queryKey: ["config-settings"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("school_settings")
+        .select("matricula_amount_nio, matricula_amount_usd")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (data) {
+        return {
+          matriculaNio: Number(data.matricula_amount_nio ?? 300),
+          matriculaUsd: Number(data.matricula_amount_usd ?? 8),
+        };
+      }
+      return { matriculaNio: 300, matriculaUsd: 8 };
+    },
+  });
+
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(currentYear);
 
@@ -351,7 +370,10 @@ export default function Matriculas() {
                         setSaldoPendiente(Math.max(restante, 0));
                         setCurrency(existing.currency);
                       } else {
-                        const base = currency === "USD" ? 8 : 300;
+                        const base =
+                          currency === "USD"
+                            ? (matriculaSettings?.matriculaUsd ?? 8)
+                            : (matriculaSettings?.matriculaNio ?? 300);
                         setTotal(base);
                         setSaldoPendiente(base);
                       }

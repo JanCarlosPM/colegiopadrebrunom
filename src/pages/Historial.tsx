@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { StatsCard } from "@/components/StatsCard";
-import { DollarSign, CheckCircle, AlertTriangle, Calendar } from "lucide-react";
+import { DollarSign, CheckCircle, AlertTriangle, Calendar, RefreshCw } from "lucide-react";
 
 /* =========================
    CONSTANTE MESES
@@ -24,19 +25,39 @@ export default function Historial() {
   const [students, setStudents] = useState<any[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
   const [search, setSearch] = useState("");
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const [enrollment, setEnrollment] = useState<any>(null);
   const [payments, setPayments] = useState<any[]>([]);
   const [charges, setCharges] = useState<any[]>([]);
 
-  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(new Date().getFullYear());
 
   /* =========================
      FETCH STUDENTS
   ========================= */
 
   useEffect(() => {
+    const fetchCurrentAcademicYear = async () => {
+      const { data, error } = await supabase
+        .from("school_settings")
+        .select("current_academic_year")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data?.current_academic_year) {
+        setYear(Number(data.current_academic_year));
+      }
+    };
+
+    fetchCurrentAcademicYear();
+  }, []);
+
+  useEffect(() => {
     const fetchStudents = async () => {
+      setLoadingStudents(true);
       const { data, error } = await supabase
         .from("students")
         .select(`
@@ -50,10 +71,12 @@ export default function Historial() {
 
       if (error) {
         console.error("Error cargando estudiantes:", error);
+        setLoadingStudents(false);
         return;
       }
 
       setStudents(data || []);
+      setLoadingStudents(false);
     };
 
     fetchStudents();
@@ -63,12 +86,13 @@ export default function Historial() {
      FETCH DATA
   ========================= */
 
-  const fetchStudentData = async (studentId: string) => {
+  const fetchStudentData = async (studentId: string, academicYear: number) => {
+    setLoadingHistory(true);
     const { data: enrollmentData, error: enrollmentError } = await supabase
       .from("enrollments")
       .select("*")
       .eq("student_id", studentId)
-      .eq("academic_year", currentYear)
+      .eq("academic_year", academicYear)
       .maybeSingle();
 
     const { data: paymentsData, error: paymentsError } = await supabase
@@ -76,7 +100,7 @@ export default function Historial() {
       .select("*")
       .eq("student_id", studentId)
       .eq("concept", "MENSUALIDAD")
-      .eq("academic_year", currentYear)
+      .eq("academic_year", academicYear)
       .order("month", { ascending: true });
 
     const { data: chargesData, error: chargesError } = await supabase
@@ -84,7 +108,7 @@ export default function Historial() {
       .select("*")
       .eq("student_id", studentId)
       .eq("concept", "MENSUALIDAD")
-      .eq("academic_year", currentYear)
+      .eq("academic_year", academicYear)
       .order("month", { ascending: true });
 
     if (enrollmentError) console.error("Error enrollment:", enrollmentError);
@@ -94,12 +118,13 @@ export default function Historial() {
     setEnrollment(enrollmentData || null);
     setPayments(paymentsData || []);
     setCharges(chargesData || []);
+    setLoadingHistory(false);
   };
 
   useEffect(() => {
     if (!selectedStudent) return;
-    fetchStudentData(selectedStudent.id);
-  }, [selectedStudent, currentYear]);
+    fetchStudentData(selectedStudent.id, year);
+  }, [selectedStudent, year]);
 
   /* =========================
      REALTIME: ACTUALIZAR AL TOQUE
@@ -109,7 +134,7 @@ export default function Historial() {
     if (!selectedStudent) return;
 
     const channel = supabase
-      .channel(`historial-${selectedStudent.id}-${currentYear}`)
+      .channel(`historial-${selectedStudent.id}-${year}`)
       .on(
         "postgres_changes",
         {
@@ -119,7 +144,7 @@ export default function Historial() {
           filter: `student_id=eq.${selectedStudent.id}`,
         },
         () => {
-          fetchStudentData(selectedStudent.id);
+          fetchStudentData(selectedStudent.id, year);
         }
       )
       .on(
@@ -131,7 +156,7 @@ export default function Historial() {
           filter: `student_id=eq.${selectedStudent.id}`,
         },
         () => {
-          fetchStudentData(selectedStudent.id);
+          fetchStudentData(selectedStudent.id, year);
         }
       )
       .on(
@@ -143,7 +168,7 @@ export default function Historial() {
           filter: `student_id=eq.${selectedStudent.id}`,
         },
         () => {
-          fetchStudentData(selectedStudent.id);
+          fetchStudentData(selectedStudent.id, year);
         }
       )
       .subscribe();
@@ -151,53 +176,127 @@ export default function Historial() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedStudent, currentYear]);
+  }, [selectedStudent, year]);
 
   /* =========================
      FILTRO BUSCADOR
   ========================= */
 
-  const filteredStudents = students.filter((s) =>
-    `${s.full_name} ${s.grades?.name ?? ""} ${s.sections?.name ?? ""}`
-      .toLowerCase()
-      .includes(search.toLowerCase())
-  );
+  const filteredStudents = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return [];
+    return students.filter((s) =>
+      `${s.full_name} ${s.grades?.name ?? ""} ${s.sections?.name ?? ""}`
+        .toLowerCase()
+        .includes(term)
+    );
+  }, [students, search]);
 
   /* =========================
      CÁLCULOS
   ========================= */
 
-  const totalPaid = useMemo(() => {
-    return payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const totalPaidByCurrency = useMemo(() => {
+    return payments.reduce(
+      (acc, p) => {
+        const amount = Number(p.amount || 0);
+        if ((p.currency ?? "NIO") === "USD") acc.usd += amount;
+        else acc.nio += amount;
+        return acc;
+      },
+      { nio: 0, usd: 0 }
+    );
   }, [payments]);
 
-  const totalPending = useMemo(() => {
+  const totalPendingByCurrency = useMemo(() => {
     return charges
       .filter((c) => c.status !== "PAGADO")
-      .reduce((sum, c) => sum + Number(c.amount || 0), 0);
+      .reduce(
+        (acc, c) => {
+          const pending = Math.max(
+            Number(c.amount || 0) - Number(c.paid_amount || 0),
+            0
+          );
+          if ((c.currency ?? "NIO") === "USD") acc.usd += pending;
+          else acc.nio += pending;
+          return acc;
+        },
+        { nio: 0, usd: 0 }
+      );
   }, [charges]);
 
-  const paidMonthsSet = useMemo(() => {
-    return new Set(
-      payments
-        .filter((p) => p.month != null)
-        .map((p) => Number(p.month))
-    );
-  }, [payments]);
+  const monthlyRows = useMemo(() => {
+    return MONTHS.map((monthName, i) => {
+      const monthNumber = i + 1;
+      const monthCharges = charges.filter((c) => Number(c.month) === monthNumber);
+      const monthPayments = payments.filter((p) => Number(p.month) === monthNumber);
+
+      const totalCharge = monthCharges.reduce(
+        (sum, c) => sum + Number(c.amount || 0),
+        0
+      );
+      const totalPaidInCharge = monthCharges.reduce(
+        (sum, c) => sum + Number(c.paid_amount || 0),
+        0
+      );
+      const totalPaidByPayments = monthPayments.reduce(
+        (sum, p) => sum + Number(p.amount || 0),
+        0
+      );
+      const saldo = Math.max(totalCharge - totalPaidInCharge, 0);
+
+      const latestPayment =
+        monthPayments.length > 0
+          ? [...monthPayments].sort(
+              (a, b) =>
+                new Date(b.paid_at || 0).getTime() -
+                new Date(a.paid_at || 0).getTime()
+            )[0]
+          : null;
+
+      const latestCharge =
+        monthCharges.length > 0
+          ? [...monthCharges].sort(
+              (a, b) =>
+                new Date(b.created_at || 0).getTime() -
+                new Date(a.created_at || 0).getTime()
+            )[0]
+          : null;
+
+      const currency = latestCharge?.currency ?? latestPayment?.currency ?? "NIO";
+
+      let status = "Sin cargo";
+      if (monthCharges.length > 0 && saldo <= 0) status = "Pagado";
+      else if (
+        monthCharges.length > 0 &&
+        (totalPaidInCharge > 0 || totalPaidByPayments > 0)
+      )
+        status = "Parcial";
+      else if (monthCharges.length > 0) status = "Pendiente";
+
+      return {
+        monthName,
+        currency,
+        totalCharge,
+        totalPaid: Math.max(totalPaidInCharge, totalPaidByPayments),
+        saldo,
+        latestPaymentDate: latestPayment?.paid_at ?? null,
+        status,
+      };
+    });
+  }, [charges, payments]);
 
   const monthsPaid = useMemo(() => {
-    return paidMonthsSet.size;
-  }, [paidMonthsSet]);
+    return monthlyRows.filter((m) => m.status === "Pagado").length;
+  }, [monthlyRows]);
 
   const pendingMonths = useMemo(() => {
-    const chargedMonths = new Set(
-      charges
-        .filter((c) => c.month != null)
-        .map((c) => Number(c.month))
-    );
+    return monthlyRows.filter((m) => m.status === "Pendiente").length;
+  }, [monthlyRows]);
 
-    return [...chargedMonths].filter((m) => !paidMonthsSet.has(m)).length;
-  }, [charges, paidMonthsSet]);
+  const partialMonths = useMemo(() => {
+    return monthlyRows.filter((m) => m.status === "Parcial").length;
+  }, [monthlyRows]);
 
   const generalStatus =
     pendingMonths > 0 || enrollment?.status !== "PAGADO"
@@ -210,37 +309,56 @@ export default function Historial() {
   return (
     <DashboardLayout
       title="Historial del Estudiante"
-      subtitle="Vista detallada de pagos por estudiante"
+      subtitle="Vista detallada de matrícula y mensualidades por estudiante"
     >
-      {/* BUSCADOR */}
-      <div className="max-w-md mb-6">
-        <Input
-          placeholder="Buscar estudiante..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      {/* FILTROS */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="md:col-span-2">
+          <Input
+            placeholder="Buscar estudiante por nombre o grado..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
 
-        {search && (
-          <div className="border rounded mt-2 max-h-48 overflow-y-auto bg-white">
-            {filteredStudents.map((s) => (
-              <div
-                key={s.id}
-                className="p-2 hover:bg-muted cursor-pointer"
-                onClick={async () => {
-                  setSelectedStudent(s);
-                  setSearch(s.full_name);
-                  await fetchStudentData(s.id);
-                }}
-              >
-                <p className="font-medium">{s.full_name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {s.grades?.name ?? "Sin grado"}
-                  {s.sections?.name ? ` — Sección ${s.sections.name}` : ""}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
+          {search && (
+            <div className="border rounded mt-2 max-h-56 overflow-y-auto bg-white">
+              {loadingStudents ? (
+                <p className="p-3 text-sm text-muted-foreground">Cargando estudiantes...</p>
+              ) : filteredStudents.length === 0 ? (
+                <p className="p-3 text-sm text-muted-foreground">No se encontraron estudiantes.</p>
+              ) : (
+                filteredStudents.map((s) => (
+                  <div
+                    key={s.id}
+                    className="p-2 hover:bg-muted cursor-pointer"
+                    onClick={async () => {
+                      setSelectedStudent(s);
+                      setSearch(s.full_name);
+                      await fetchStudentData(s.id, year);
+                    }}
+                  >
+                    <p className="font-medium">{s.full_name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {s.grades?.name ?? "Sin grado"}
+                      {s.sections?.name ? ` — Sección ${s.sections.name}` : ""}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <label className="text-sm font-medium">Año lectivo</label>
+          <Input
+            type="number"
+            min={2020}
+            max={2100}
+            value={year}
+            onChange={(e) => setYear(Number(e.target.value || new Date().getFullYear()))}
+          />
+        </div>
       </div>
 
       {selectedStudent && (
@@ -281,22 +399,39 @@ export default function Historial() {
                 {selectedStudent.guardians?.phone ?? "—"}
               </div>
             </div>
+            <div className="pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => fetchStudentData(selectedStudent.id, year)}
+                disabled={loadingHistory}
+              >
+                <RefreshCw className={`h-4 w-4 ${loadingHistory ? "animate-spin" : ""}`} />
+                Actualizar historial
+              </Button>
+            </div>
           </div>
 
           {/* STATS */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <StatsCard
               title="Total Pagado"
-              value={`C$ ${totalPaid.toLocaleString()}`}
+              value={`C$ ${totalPaidByCurrency.nio.toLocaleString()} | $ ${totalPaidByCurrency.usd.toLocaleString()}`}
               icon={DollarSign}
               variant="success"
             />
 
             <StatsCard
-              title="Total Pendiente"
-              value={`C$ ${totalPending.toLocaleString()}`}
+              title="Saldo Pendiente"
+              value={`C$ ${totalPendingByCurrency.nio.toLocaleString()} | $ ${totalPendingByCurrency.usd.toLocaleString()}`}
               icon={AlertTriangle}
-              variant={totalPending > 0 ? "destructive" : "success"}
+              variant={
+                totalPendingByCurrency.nio + totalPendingByCurrency.usd > 0
+                  ? "destructive"
+                  : "success"
+              }
             />
 
             <StatsCard
@@ -307,8 +442,8 @@ export default function Historial() {
             />
 
             <StatsCard
-              title="Meses Pendientes"
-              value={pendingMonths}
+              title="Pendientes / Parciales"
+              value={`${pendingMonths} / ${partialMonths}`}
               icon={Calendar}
               variant={pendingMonths > 0 ? "warning" : "success"}
             />
@@ -317,12 +452,19 @@ export default function Historial() {
           {/* MATRÍCULA */}
           <div className="bg-card rounded-xl border shadow-sm p-5 mb-6">
             <h3 className="font-semibold mb-3">
-              Matrícula {currentYear}
+              Matrícula {year}
             </h3>
 
             {enrollment ? (
               <div className="flex items-center gap-4 text-sm">
-                <span>Total: C$ {Number(enrollment.total_amount || 0).toLocaleString()}</span>
+                <span>
+                  Total: {enrollment.currency === "USD" ? "$" : "C$"}{" "}
+                  {Number(enrollment.total_amount || 0).toLocaleString()}
+                </span>
+                <span>
+                  Pagado: {enrollment.currency === "USD" ? "$" : "C$"}{" "}
+                  {Number(enrollment.paid_amount || 0).toLocaleString()}
+                </span>
                 <Badge
                   className={
                     enrollment.status === "PAGADO"
@@ -337,7 +479,7 @@ export default function Historial() {
               </div>
             ) : (
               <div className="flex items-center gap-4 text-sm">
-                <span>Total: C$ 0</span>
+                <span>Sin registro de matrícula para este año</span>
                 <Badge className="bg-red-100 text-red-700">
                   PENDIENTE
                 </Badge>
@@ -358,84 +500,60 @@ export default function Historial() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Mes</TableHead>
-                    <TableHead>Monto</TableHead>
-                    <TableHead>Fecha</TableHead>
+                    <TableHead>Cargo</TableHead>
+                    <TableHead>Pagado</TableHead>
+                    <TableHead>Saldo</TableHead>
+                    <TableHead>Último pago</TableHead>
                     <TableHead>Estado</TableHead>
                   </TableRow>
                 </TableHeader>
 
                 <TableBody>
-                  {MONTHS.map((m, i) => {
-                    const monthNumber = i + 1;
-
-                    const monthCharges = charges.filter(
-                      (c) => Number(c.month) === monthNumber
-                    );
-
-                    const monthPayments = payments.filter(
-                      (p) => Number(p.month) === monthNumber
-                    );
-
-                    const latestCharge =
-                      monthCharges.length > 0
-                        ? [...monthCharges].sort(
-                          (a, b) =>
-                            new Date(b.created_at || 0).getTime() -
-                            new Date(a.created_at || 0).getTime()
-                        )[0]
-                        : null;
-
-                    const latestPayment =
-                      monthPayments.length > 0
-                        ? [...monthPayments].sort(
-                          (a, b) =>
-                            new Date(b.paid_at || 0).getTime() -
-                            new Date(a.paid_at || 0).getTime()
-                        )[0]
-                        : null;
-
-                    const estadoMes = latestPayment
-                      ? "Pagado"
-                      : latestCharge?.status === "PARCIAL"
-                        ? "Parcial"
-                        : latestCharge
-                          ? "Pendiente"
-                          : "—";
-
-                    const montoMes = latestPayment?.amount ?? latestCharge?.amount ?? 0;
-                    const monedaMes = latestPayment?.currency ?? latestCharge?.currency ?? "NIO";
-
+                  {monthlyRows.map((row, i) => {
+                    const symbol = row.currency === "USD" ? "$" : "C$";
                     return (
                       <TableRow key={i}>
                         <TableCell className="font-medium">
-                          {m}
+                          {row.monthName}
                         </TableCell>
 
                         <TableCell>
-                          {latestCharge || latestPayment
-                            ? `${monedaMes === "USD" ? "$" : "C$"} ${Number(montoMes).toLocaleString()}`
+                          {row.totalCharge > 0
+                            ? `${symbol} ${Number(row.totalCharge).toLocaleString()}`
                             : "—"}
                         </TableCell>
 
                         <TableCell>
-                          {latestPayment?.paid_at
-                            ? new Date(latestPayment.paid_at).toLocaleDateString("es-NI")
+                          {row.totalPaid > 0
+                            ? `${symbol} ${Number(row.totalPaid).toLocaleString()}`
+                            : "—"}
+                        </TableCell>
+
+                        <TableCell>
+                          {row.totalCharge > 0
+                            ? `${symbol} ${Number(row.saldo).toLocaleString()}`
+                            : "—"}
+                        </TableCell>
+
+                        <TableCell>
+                          {row.latestPaymentDate
+                            ? new Date(row.latestPaymentDate).toLocaleDateString("es-NI")
                             : "—"}
                         </TableCell>
 
                         <TableCell>
                           <Badge
                             className={
-                              estadoMes === "Pagado"
+                              row.status === "Pagado"
                                 ? "bg-green-100 text-green-700"
-                                : estadoMes === "Parcial"
+                                : row.status === "Parcial"
                                   ? "bg-yellow-100 text-yellow-700"
-                                  : estadoMes === "Pendiente"
+                                  : row.status === "Pendiente"
                                     ? "bg-red-100 text-red-700"
                                     : "bg-gray-100 text-gray-700"
                             }
                           >
-                            {estadoMes}
+                            {row.status}
                           </Badge>
                         </TableCell>
                       </TableRow>
@@ -446,6 +564,12 @@ export default function Historial() {
             </div>
           </div>
         </>
+      )}
+
+      {!selectedStudent && (
+        <div className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground">
+          Selecciona un estudiante para ver su historial de matrícula y mensualidades.
+        </div>
       )}
     </DashboardLayout>
   );

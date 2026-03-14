@@ -32,6 +32,51 @@ import {
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { FormField } from "@/components/common/FormField";
 import { imprimirReciboOficial } from "@/utils/imprimirReciboMatricula";
+import { usePaymentsFlow } from "@/hooks/usePaymentsFlow";
+import { canApplyInputChange } from "@/lib/paymentValidation";
+import { mapSupabaseErrorToToast } from "@/lib/errorHandling";
+
+type StudentRow = {
+  id: string;
+  grade_id?: string | null;
+  full_name: string;
+  grades?: { name?: string | null } | null;
+  sections?: { name?: string | null } | null;
+};
+
+type MonthlyChargeRow = {
+  id: string;
+  student_id: string;
+  month: number;
+  amount: number;
+  paid_amount: number;
+  currency: "NIO" | "USD";
+  status: "PENDIENTE" | "PARCIAL" | "PAGADO";
+};
+
+type MonthlyPaymentRow = {
+  id: string;
+  currency: "NIO" | "USD";
+  amount: number;
+  received_amount: number;
+  change_amount: number;
+  month: number;
+  paid_at: string;
+  description?: string | null;
+  method?: string | null;
+  students?: {
+    full_name?: string | null;
+    grades?: { name?: string | null } | null;
+    sections?: { name?: string | null } | null;
+  } | null;
+};
+
+type PaymentFormState = {
+  student_id: string;
+  charge_id: string;
+  recibido: string;
+  pay_currency: "NIO" | "USD";
+};
 
 /* ================= FETCHERS ================= */
 
@@ -47,7 +92,7 @@ const fetchCurrentAcademicYear = async () => {
   return data?.current_academic_year ?? new Date().getFullYear();
 };
 
-const fetchPayments = async (year: number) => {
+const fetchPayments = async (year: number): Promise<MonthlyPaymentRow[]> => {
   const { data, error } = await supabase
     .from("payments")
     .select(`
@@ -75,10 +120,10 @@ const fetchPayments = async (year: number) => {
     .order("paid_at", { ascending: false });
 
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as MonthlyPaymentRow[];
 };
 
-const fetchStudents = async () => {
+const fetchStudents = async (): Promise<StudentRow[]> => {
   const { data, error } = await supabase
     .from("students")
     .select(`
@@ -93,7 +138,7 @@ const fetchStudents = async () => {
     .order("full_name");
 
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as StudentRow[];
 };
 
 const fetchGradePrice = async (gradeId: string) => {
@@ -108,7 +153,7 @@ const fetchGradePrice = async (gradeId: string) => {
   return data;
 };
 
-const fetchStudentOpenCharges = async (studentId: string, year: number) => {
+const fetchStudentOpenCharges = async (studentId: string, year: number): Promise<MonthlyChargeRow[]> => {
   const { data, error } = await supabase
     .from("charges")
     .select(`
@@ -131,7 +176,7 @@ const fetchStudentOpenCharges = async (studentId: string, year: number) => {
     .order("created_at", { ascending: false });
 
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as MonthlyChargeRow[];
 };
 
 /* ================= COMPONENT ================= */
@@ -150,7 +195,7 @@ export default function Pagos() {
   const [search, setSearch] = useState("");
   const [tableSearch, setTableSearch] = useState("");
   const [open, setOpen] = useState(false);
-  const [studentCharges, setStudentCharges] = useState<any[]>([]);
+  const [studentCharges, setStudentCharges] = useState<MonthlyChargeRow[]>([]);
 
   const { data: payments = [] } = useQuery({
     queryKey: ["payments", year],
@@ -163,7 +208,7 @@ export default function Pagos() {
     queryFn: fetchStudents,
   });
 
-  const [form, setForm] = useState<any>({
+  const [form, setForm] = useState<PaymentFormState>({
     student_id: "",
     charge_id: "",
     recibido: "",
@@ -171,7 +216,7 @@ export default function Pagos() {
   });
 
   const selectedStudent = useMemo(
-    () => students.find((s: any) => s.id === form.student_id),
+    () => students.find((s) => s.id === form.student_id),
     [students, form.student_id]
   );
 
@@ -199,7 +244,7 @@ export default function Pagos() {
   useEffect(() => {
     if (!form.student_id || form.charge_id || studentCharges.length === 0) return;
     const firstCharge = studentCharges[0];
-    setForm((prev: any) => ({
+    setForm((prev) => ({
       ...prev,
       charge_id: firstCharge.id,
       pay_currency: normalizeCurrency(firstCharge.currency),
@@ -218,60 +263,37 @@ export default function Pagos() {
     setStudentCharges([]);
   };
 
-  const selectedCharge = studentCharges.find(
-    (c: any) => c.id === form.charge_id
-  );
+  const selectedCharge = studentCharges.find((c) => c.id === form.charge_id);
 
   const totalOriginal = Number(selectedCharge?.amount ?? 0);
   const paidSoFar = Number(selectedCharge?.paid_amount ?? 0);
-  const remainingInChargeCurrency = Math.max(totalOriginal - paidSoFar, 0);
 
-  const chargeCurrency = normalizeCurrency(selectedCharge?.currency ?? "USD");
-  const payCurrency = normalizeCurrency(form.pay_currency ?? "USD");
-  const maxIntegerDigits = payCurrency === "USD" ? 3 : 4;
-  const recibidoRaw = String(form.recibido ?? "").trim();
-  const recibidoNormalized = recibidoRaw.replace(",", ".");
-  const [recibidoIntPart = ""] = recibidoNormalized.split(".");
-  const recibidoNum = Number(recibidoNormalized || 0);
-  const isRecibidoFormatValid = /^\d*\.?\d{0,2}$/.test(recibidoNormalized);
-  const isRecibidoDigitsValid = recibidoIntPart.length <= maxIntegerDigits;
-  const isRecibidoPositive = recibidoNum > 0;
-  const isRecibidoValid =
-    recibidoNormalized.length > 0 &&
-    isRecibidoFormatValid &&
-    isRecibidoDigitsValid &&
-    isRecibidoPositive;
+  const flow = usePaymentsFlow({
+    chargeAmount: totalOriginal,
+    chargePaidAmount: paidSoFar,
+    chargeCurrency: selectedCharge?.currency,
+    payCurrency: form.pay_currency,
+    exchangeRate: dynamicRate,
+    receivedInput: form.recibido,
+  });
 
-  const remainingInPayCurrency =
-    chargeCurrency === payCurrency
-      ? remainingInChargeCurrency
-      : chargeCurrency === "USD" && payCurrency === "NIO"
-        ? remainingInChargeCurrency * dynamicRate
-        : remainingInChargeCurrency / dynamicRate;
-
-  const amountAppliedInPayCurrency = Math.min(
-    recibidoNum,
-    Number(remainingInPayCurrency.toFixed(2))
-  );
-
-  const amountAppliedInChargeCurrency =
-    chargeCurrency === payCurrency
-      ? amountAppliedInPayCurrency
-      : chargeCurrency === "USD" && payCurrency === "NIO"
-        ? amountAppliedInPayCurrency / dynamicRate
-        : amountAppliedInPayCurrency * dynamicRate;
-
-  const cambio =
-    recibidoNum > amountAppliedInPayCurrency
-      ? recibidoNum - amountAppliedInPayCurrency
-      : 0;
+  const chargeCurrency = flow.normalizedChargeCurrency;
+  const payCurrency = flow.normalizedPayCurrency;
+  const recibidoNum = flow.validation.numericValue;
+  const isRecibidoFormatValid = flow.validation.isFormatValid;
+  const isRecibidoDigitsValid = flow.validation.isDigitsValid;
+  const isRecibidoPositive = flow.validation.isPositive;
+  const isRecibidoValid = flow.validation.isValid;
+  const remainingInPayCurrency = flow.remainingInPayCurrency;
+  const amountAppliedInPayCurrency = flow.appliedInPayCurrency;
+  const cambio = flow.change;
 
   const simboloPago = currencySymbol(payCurrency);
   const loadStudentOpenCharges = async (studentId: string) => {
     try {
       const data = await fetchStudentOpenCharges(studentId, year);
 
-      const byMonth = new Map<number, any>();
+      const byMonth = new Map<number, MonthlyChargeRow>();
 
       for (const charge of data ?? []) {
         if (!charge.month) continue;
@@ -288,11 +310,11 @@ export default function Pagos() {
       }
 
       const visibles = Array.from(byMonth.values())
-        .filter((c: any) => {
+        .filter((c) => {
           const saldo = Number(c.amount || 0) - Number(c.paid_amount || 0);
           return (c.status === "PENDIENTE" || c.status === "PARCIAL") && saldo > 0;
         })
-        .sort((a: any, b: any) => a.month - b.month);
+        .sort((a, b) => a.month - b.month);
 
       setStudentCharges(visibles);
     } catch (error) {
@@ -414,7 +436,7 @@ export default function Pagos() {
       };
     },
 
-    onSuccess: async ({ paidAt, chargeMonth, totalInPayCurrency, appliedInPayCurrency, cambio }) => {
+    onSuccess: async ({ paidAt, chargeMonth, appliedInPayCurrency }) => {
       await qc.invalidateQueries({ queryKey: ["payments", year] });
       await qc.invalidateQueries({ queryKey: ["dashboard"] });
 
@@ -443,39 +465,28 @@ export default function Pagos() {
       toast.success("Pago registrado correctamente.");
     },
 
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       console.error("Error registrando pago:", err);
+      const message = mapSupabaseErrorToToast(err, {
+        currency: payCurrency,
+        fallback: "No se pudo registrar el pago.",
+        customMap: {
+          MONTO_INVALIDO: "El monto recibido no es válido.",
+          YA_PAGADO: "Esta mensualidad ya está pagada y no se puede cobrar de nuevo.",
+          NO_STUDENT: "Debes seleccionar un estudiante.",
+          MONEDA_INVALIDA: "Moneda de pago inválida.",
+        },
+      });
 
-      if (err.message === "MONTO_INVALIDO") {
+      if (message.includes("monto recibido")) {
         toast.error("El monto recibido no es válido.");
         return;
       }
-      if (err.message === "LIMITE_RECIBIDO") {
-        toast.error(
-          payCurrency === "USD"
-            ? "En USD, el campo Recibido acepta máximo 3 cifras (hasta 999.99)."
-            : "En C$, el campo Recibido acepta máximo 4 cifras (hasta 9999.99)."
-        );
-        return;
-      }
-      if (err.message === "YA_PAGADO") {
-        toast.error("Esta mensualidad ya está pagada y no se puede cobrar de nuevo.");
-        return;
-      }
-      if (err.message === "NO_STUDENT") {
-        toast.error("Debes seleccionar un estudiante.");
-        return;
-      }
-      if (err.message === "MONEDA_INVALIDA") {
-        toast.error("Moneda de pago inválida.");
-        return;
-      }
-
-      toast.error("No se pudo registrar el pago.");
+      toast.error(message);
     },
   });
 
-  const filtered = payments.filter((p: any) => {
+  const filtered = payments.filter((p) => {
     const text = `${p.students?.full_name ?? ""} ${p.students?.grades?.name ?? ""} ${p.students?.sections?.name ?? ""} ${p.description ?? ""} ${p.method ?? ""} ${MONTHS_ES[(p.month ?? 1) - 1] ?? ""}`
       .toLowerCase();
 
@@ -483,7 +494,7 @@ export default function Pagos() {
   });
 
   const searchInDialog = search.toLowerCase().trim();
-  const filteredStudents = students.filter((s: any) => {
+  const filteredStudents = students.filter((s) => {
     const text = `${s.full_name ?? ""} ${s.grades?.name ?? ""} ${s.sections?.name ?? ""}`
       .toLowerCase();
     return text.includes(searchInDialog);
@@ -574,7 +585,7 @@ export default function Pagos() {
                         No se encontraron estudiantes con esa búsqueda.
                       </p>
                     )}
-                    {filteredStudents.map((s: any) => (
+                    {filteredStudents.map((s) => (
                         <div
                           key={s.id}
                           className="p-3 hover:bg-muted cursor-pointer border-b last:border-b-0"
@@ -641,7 +652,7 @@ export default function Pagos() {
                         }
                       >
                         <option value="">Seleccionar mensualidad</option>
-                        {studentCharges.map((c: any) => {
+                        {studentCharges.map((c) => {
                           const saldoMes = Number(c.amount || 0) - Number(c.paid_amount || 0);
                           return (
                             <option key={c.id} value={c.id}>
@@ -709,10 +720,7 @@ export default function Pagos() {
                             value={String(form.recibido ?? "")}
                             onChange={(e) => {
                               const raw = e.target.value.replace(",", ".");
-                              if (!/^\d*\.?\d{0,2}$/.test(raw)) return;
-                              const [intPart = ""] = raw.split(".");
-                              const maxDigits = payCurrency === "USD" ? 3 : 4;
-                              if (intPart.length > maxDigits) return;
+                              if (!canApplyInputChange(raw, payCurrency)) return;
                               setForm({ ...form, recibido: raw });
                             }}
                           />
@@ -828,7 +836,7 @@ export default function Pagos() {
               </TableCell>
             </TableRow>
           )}
-          {filtered.map((p: any) => {
+          {filtered.map((p) => {
             const simbolo = currencySymbol(p.currency);
 
             return (

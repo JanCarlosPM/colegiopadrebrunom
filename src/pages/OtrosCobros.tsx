@@ -33,6 +33,14 @@ import { formatMoney, normalizeCurrency } from "@/lib/billing";
 import { toast } from "sonner";
 import { FormField } from "@/components/common/FormField";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import {
+  canApplyInputChange,
+  validateAmountByCurrency,
+} from "@/lib/paymentValidation";
+import {
+  isMissingTableError,
+  mapSupabaseErrorToToast,
+} from "@/lib/errorHandling";
 
 type Student = {
   id: string;
@@ -56,20 +64,20 @@ type AppUser = {
   is_active: boolean;
 };
 
-const ITEM_CATEGORIES = ["PROMOCION", "GRADUACION", "LIBROS", "UNIFORME", "OTROS"] as const;
-
-const isMissingTableError = (error: any) => {
-  const msg = String(error?.message || "").toLowerCase();
-  const details = String(error?.details || "").toLowerCase();
-  return (
-    error?.code === "PGRST205" ||
-    msg.includes("schema cache") ||
-    msg.includes("payment_items") ||
-    msg.includes("other_payments") ||
-    details.includes("payment_items") ||
-    details.includes("other_payments")
-  );
+type OtherPaymentRow = {
+  id: string;
+  item_name: string | null;
+  amount: number;
+  received_amount: number;
+  change_amount: number;
+  currency: "NIO" | "USD";
+  status: "COMPLETADO" | "PARCIAL";
+  payment_date: string;
+  students?: { full_name?: string | null } | null;
+  payment_items?: { name?: string | null; category?: string | null } | null;
 };
+
+const ITEM_CATEGORIES = ["PROMOCION", "GRADUACION", "LIBROS", "UNIFORME", "OTROS"] as const;
 
 const fetchStudents = async (): Promise<Student[]> => {
   const { data, error } = await supabase
@@ -105,7 +113,7 @@ const fetchCurrentAppUser = async (): Promise<AppUser | null> => {
   return data;
 };
 
-const fetchOtherPayments = async (year: number) => {
+const fetchOtherPayments = async (year: number): Promise<OtherPaymentRow[]> => {
   const { data, error } = await supabase
     .from("other_payments")
     .select(`
@@ -127,7 +135,7 @@ const fetchOtherPayments = async (year: number) => {
     .eq("academic_year", year)
     .order("payment_date", { ascending: false });
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as OtherPaymentRow[];
 };
 
 export default function OtrosCobros() {
@@ -190,7 +198,7 @@ export default function OtrosCobros() {
   const filteredPayments = useMemo(() => {
     const term = tableSearch.trim().toLowerCase();
     if (!term) return payments;
-    return payments.filter((p: any) =>
+    return payments.filter((p) =>
       `${p.students?.full_name ?? ""} ${p.item_name ?? ""} ${p.payment_items?.category ?? ""} ${p.status ?? ""}`
         .toLowerCase()
         .includes(term)
@@ -198,16 +206,11 @@ export default function OtrosCobros() {
   }, [payments, tableSearch]);
 
   const currency = normalizeCurrency(paymentForm.currency);
-  const receivedRaw = String(paymentForm.received ?? "").replace(",", ".");
-  const [receivedInt = ""] = receivedRaw.split(".");
-  const maxDigits = currency === "USD" ? 3 : 4;
-  const isReceivedValid =
-    /^\d*\.?\d{0,2}$/.test(receivedRaw) &&
-    receivedInt.length <= maxDigits &&
-    Number(receivedRaw || 0) > 0;
+  const amountValidation = validateAmountByCurrency(paymentForm.received, currency);
+  const isReceivedValid = amountValidation.isValid;
 
   const amountToCharge = Number(paymentForm.amount || 0);
-  const receivedNum = Number(receivedRaw || 0);
+  const receivedNum = amountValidation.numericValue;
   const applied = Math.min(amountToCharge, receivedNum);
   const change = Math.max(receivedNum - applied, 0);
   const status = applied + 0.0001 >= amountToCharge ? "COMPLETADO" : "PARCIAL";
@@ -236,10 +239,14 @@ export default function OtrosCobros() {
       setOpenItem(false);
       setItemForm({ name: "", category: "OTROS", default_amount: "", currency: "NIO" });
     },
-    onError: (e: any) =>
+    onError: (e: unknown) =>
       isMissingTableError(e)
         ? toast.error("Falta aplicar la migración del módulo. Ejecuta 002_other_payments_module.sql en Supabase.")
-        : toast.error(e?.message || "No se pudo crear el concepto"),
+        : toast.error(
+            mapSupabaseErrorToToast(e, {
+              fallback: "No se pudo crear el concepto",
+            })
+          ),
   });
 
   const createOtherPayment = useMutation({
@@ -278,10 +285,15 @@ export default function OtrosCobros() {
       });
       setStudentSearch("");
     },
-    onError: (e: any) =>
+    onError: (e: unknown) =>
       isMissingTableError(e)
         ? toast.error("Falta aplicar la migración del módulo. Ejecuta 002_other_payments_module.sql en Supabase.")
-        : toast.error(e?.message || "No se pudo registrar el pago"),
+        : toast.error(
+            mapSupabaseErrorToToast(e, {
+              currency,
+              fallback: "No se pudo registrar el pago",
+            })
+          ),
   });
 
   return (
@@ -543,9 +555,7 @@ export default function OtrosCobros() {
                   value={paymentForm.received}
                   onChange={(e) => {
                     const raw = e.target.value.replace(",", ".");
-                    if (!/^\d*\.?\d{0,2}$/.test(raw)) return;
-                    const [intPart = ""] = raw.split(".");
-                    if (intPart.length > maxDigits) return;
+                    if (!canApplyInputChange(raw, currency)) return;
                     setPaymentForm((f) => ({ ...f, received: raw }));
                   }}
                 />
@@ -625,7 +635,7 @@ export default function OtrosCobros() {
               </TableCell>
             </TableRow>
           )}
-          {filteredPayments.map((p: any) => (
+          {filteredPayments.map((p) => (
             <TableRow key={p.id}>
               <TableCell>{p.students?.full_name ?? "—"}</TableCell>
               <TableCell>{p.item_name ?? p.payment_items?.name ?? "—"}</TableCell>

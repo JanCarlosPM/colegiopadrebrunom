@@ -31,6 +31,42 @@ import {
   formatMoney,
   normalizeCurrency,
 } from "@/lib/billing";
+import { useEnrollmentFlow } from "@/hooks/useEnrollmentFlow";
+import { canApplyInputChange } from "@/lib/paymentValidation";
+import { mapSupabaseErrorToToast } from "@/lib/errorHandling";
+import { buildMissingMonthlyCharges } from "@/services/charges";
+
+type StudentRow = {
+  id: string;
+  grade_id?: string | null;
+  full_name: string;
+  grades?: { name?: string | null } | null;
+  sections?: { name?: string | null } | null;
+};
+
+type EnrollmentRow = {
+  id: string;
+  student_id: string;
+  total_amount: number;
+  paid_amount: number;
+  currency: "NIO" | "USD";
+  status: "PENDIENTE" | "PARCIAL" | "PAGADO";
+};
+
+type MatriculaPaymentRow = {
+  id: string;
+  amount: number;
+  received_amount: number;
+  change_amount: number;
+  currency: "NIO" | "USD";
+  description?: string | null;
+  paid_at: string;
+  students?: {
+    full_name?: string | null;
+    grades?: { name?: string | null } | null;
+    sections?: { name?: string | null } | null;
+  } | null;
+};
 
 /* ================= FETCH ================= */
 
@@ -96,9 +132,9 @@ const fetchData = async (year: number) => {
   if (paymentsError) throw paymentsError;
 
   return {
-    enrollments: enrollments ?? [],
-    students: students ?? [],
-    payments: payments ?? [],
+    enrollments: (enrollments ?? []) as EnrollmentRow[],
+    students: (students ?? []) as StudentRow[],
+    payments: (payments ?? []) as MatriculaPaymentRow[],
   };
 };
 
@@ -153,20 +189,25 @@ export default function Matriculas() {
   const [infoMsg, setInfoMsg] = useState("");
 
   const [search, setSearch] = useState("");
-  const [selectedStudent, setSelectedStudent] = useState<any>(null);
+  const [selectedStudent, setSelectedStudent] = useState<StudentRow | null>(null);
 
   const [currency, setCurrency] = useState<"NIO" | "USD">("NIO");
-  const [paid, setPaid] = useState(0);
   const [recibidoInput, setRecibidoInput] = useState("");
   const [tableSearch, setTableSearch] = useState("");
   const [total, setTotal] = useState(300);
   const [enrollmentHint, setEnrollmentHint] = useState("");
 
-  const cambio = Math.max(paid - saldoPendiente, 0);
+  const enrollmentFlow = useEnrollmentFlow({
+    currency,
+    saldoPendiente,
+    recibidoInput,
+  });
+
+  const cambio = enrollmentFlow.cambio;
 
   const filteredStudents = useMemo(() => {
     if (!search) return [];
-    return students.filter((s: any) =>
+    return students.filter((s) =>
       `${s.full_name} ${s.grades?.name ?? ""} ${s.sections?.name ?? ""}`
         .toLowerCase()
         .includes(search.toLowerCase())
@@ -176,7 +217,7 @@ export default function Matriculas() {
   const filteredPayments = useMemo(() => {
     if (!tableSearch) return payments;
 
-    return payments.filter((p: any) => {
+    return payments.filter((p) => {
       const searchValue = tableSearch.toLowerCase();
 
       const fecha = new Date(p.paid_at).toLocaleString("es-NI", {
@@ -202,12 +243,7 @@ export default function Matriculas() {
     });
   }, [payments, tableSearch]);
 
-  const maxIntegerDigits = currency === "USD" ? 3 : 4;
-  const normalizedPaidInput = recibidoInput.replace(",", ".");
-  const [intPartPaid = ""] = normalizedPaidInput.split(".");
-  const isPaidFormatValid = /^\d*\.?\d{0,2}$/.test(normalizedPaidInput);
-  const isPaidDigitsValid = intPartPaid.length <= maxIntegerDigits;
-  const isPaidValid = isPaidFormatValid && isPaidDigitsValid && paid > 0;
+  const isPaidValid = enrollmentFlow.validation.isValid;
 
   /* ================= MUTATION ================= */
 
@@ -262,26 +298,17 @@ export default function Matriculas() {
 
         if (existingChargesError) throw existingChargesError;
 
-        const existingMonths = new Set(
-          (existingCharges ?? [])
-            .map((c: any) => Number(c.month))
-            .filter((m: number) => m >= 1 && m <= 12)
+        const existingMonths = (existingCharges ?? []).map((c: { month: number }) =>
+          Number(c.month)
         );
-
-        const missingRows = Array.from({ length: 12 }, (_, i) => i + 1)
-          .filter((month) => !existingMonths.has(month))
-          .map((month) => ({
-            student_id: selectedStudent.id,
-            academic_year: year,
-            grade_id: gradeId,
-            concept: "MENSUALIDAD",
-            month,
-            due_date: `${year}-${String(month).padStart(2, "0")}-10`,
-            amount: monthlyAmount,
-            currency: chargeCurrency,
-            status: "PENDIENTE",
-            paid_amount: 0,
-          }));
+        const missingRows = buildMissingMonthlyCharges({
+          studentId: selectedStudent.id,
+          gradeId,
+          academicYear: year,
+          monthlyAmount,
+          currency: chargeCurrency,
+          existingMonths,
+        });
 
         if (missingRows.length === 0) return;
 
@@ -296,8 +323,8 @@ export default function Matriculas() {
 
       if (!existing) {
         const totalOriginal = Number(total);
-        montoAplicado = Math.min(paid, totalOriginal);
-        cambioPago = Math.max(paid - montoAplicado, 0);
+        montoAplicado = Math.min(enrollmentFlow.paid, totalOriginal);
+        cambioPago = Math.max(enrollmentFlow.paid - montoAplicado, 0);
 
         statusPago = montoAplicado < totalOriginal ? "PARCIAL" : "PAGADO";
 
@@ -325,8 +352,8 @@ export default function Matriculas() {
           throw new Error("YA_PAGADO");
         }
 
-        montoAplicado = Math.min(paid, restante);
-        cambioPago = Math.max(paid - montoAplicado, 0);
+        montoAplicado = Math.min(enrollmentFlow.paid, restante);
+        cambioPago = Math.max(enrollmentFlow.paid - montoAplicado, 0);
 
         if (montoAplicado <= 0) {
           throw new Error("YA_PAGADO");
@@ -352,7 +379,7 @@ export default function Matriculas() {
         student_id: selectedStudent.id,
         concept: "MATRICULA",
         amount: montoAplicado,
-        received_amount: paid,
+        received_amount: enrollmentFlow.paid,
         change_amount: cambioPago,
         currency,
         academic_year: year,
@@ -387,15 +414,14 @@ export default function Matriculas() {
           anio: String(year),
           nivel: selectedStudent.sections?.name ?? "",
           montoCordobas:
-            currency === "NIO" ? Number(paid).toFixed(2) : "",
+            currency === "NIO" ? Number(enrollmentFlow.paid).toFixed(2) : "",
           montoDolares:
-            currency === "USD" ? Number(paid).toFixed(2) : "",
+            currency === "USD" ? Number(enrollmentFlow.paid).toFixed(2) : "",
           sumaDe: `${currency === "USD" ? "$" : "C$"} ${Number(result.montoAplicado || 0).toFixed(2)}`,
           concepto: "Pago de matrícula",
         });
       }, 300);
 
-      setPaid(0);
       setRecibidoInput("");
       setSearch("");
       setSelectedStudent(null);
@@ -404,22 +430,22 @@ export default function Matriculas() {
       setCurrency("NIO");
     },
 
-    onError: (err: any) => {
-      if (err.message === "YA_PAGADO") {
+    onError: (err: unknown) => {
+      const message = mapSupabaseErrorToToast(err, {
+        currency,
+        fallback: "Error al registrar matrícula.",
+        customMap: {
+          YA_PAGADO: "Esta matrícula ya está completamente pagada.",
+          MONTO_INVALIDO:
+            currency === "USD"
+              ? "Recibido inválido. En USD se permiten hasta 3 cifras (999.99)."
+              : "Recibido inválido. En C$ se permiten hasta 4 cifras (9999.99).",
+        },
+      });
+      if (message.includes("ya está completamente pagada")) {
         setInfoMsg("Esta matrícula ya está completamente pagada.");
-      } else if (err.message === "MONTO_INVALIDO") {
-        setInfoMsg(
-          currency === "USD"
-            ? "Recibido inválido. En USD se permiten hasta 3 cifras (999.99)."
-            : "Recibido inválido. En C$ se permiten hasta 4 cifras (9999.99)."
-        );
       } else {
-        const detailed =
-          err?.message ||
-          err?.details ||
-          err?.hint ||
-          "Error al registrar matrícula.";
-        setInfoMsg(detailed);
+        setInfoMsg(message);
       }
       setOpenInfo(true);
     },
@@ -465,7 +491,7 @@ export default function Matriculas() {
                       No se encontraron estudiantes con esa búsqueda.
                     </p>
                   )}
-                  {filteredStudents.map((s: any) => (
+                  {filteredStudents.map((s) => (
                     <div
                       key={s.id}
                       className="p-3 hover:bg-muted cursor-pointer flex gap-2 border-b last:border-b-0"
@@ -500,7 +526,6 @@ export default function Matriculas() {
                           setEnrollmentHint("");
                         }
 
-                        setPaid(0);
                         setRecibidoInput("");
                         setSelectedStudent(s);
                         setSearch(s.full_name);
@@ -534,7 +559,6 @@ export default function Matriculas() {
                       setSearch("");
                       setSaldoPendiente(0);
                       setRecibidoInput("");
-                      setPaid(0);
                       setEnrollmentHint("");
                     }}
                   >
@@ -568,7 +592,7 @@ export default function Matriculas() {
 
                     if (selectedStudent) {
                       const enrollment = enrollments.find(
-                        (en: any) => en.student_id === selectedStudent.id
+                        (en) => en.student_id === selectedStudent.id
                       );
 
                       if (enrollment) {
@@ -597,7 +621,6 @@ export default function Matriculas() {
                       }
                     }
 
-                    setPaid(0);
                     setRecibidoInput("");
                   }}
                 >
@@ -627,12 +650,8 @@ export default function Matriculas() {
                   value={recibidoInput}
                   onChange={(e) => {
                     const raw = e.target.value.replace(",", ".");
-                    if (!/^\d*\.?\d{0,2}$/.test(raw)) return;
-                    const [intPart = ""] = raw.split(".");
-                    const maxDigits = currency === "USD" ? 3 : 4;
-                    if (intPart.length > maxDigits) return;
+                    if (!canApplyInputChange(raw, currency)) return;
                     setRecibidoInput(raw);
-                    setPaid(Number(raw || 0));
                   }}
                 />
               </FormField>
@@ -654,7 +673,6 @@ export default function Matriculas() {
                   onClick={() => {
                     const exacto = Number(saldoPendiente.toFixed(2));
                     setRecibidoInput(exacto.toString());
-                    setPaid(exacto);
                   }}
                 >
                   Monto exacto
@@ -666,7 +684,6 @@ export default function Matriculas() {
                   onClick={() => {
                     const mitad = Number((saldoPendiente / 2).toFixed(2));
                     setRecibidoInput(mitad.toString());
-                    setPaid(mitad);
                   }}
                 >
                   Mitad
@@ -677,7 +694,6 @@ export default function Matriculas() {
                   className="h-9 text-xs"
                   onClick={() => {
                     setRecibidoInput("");
-                    setPaid(0);
                   }}
                 >
                   Limpiar
@@ -767,7 +783,7 @@ export default function Matriculas() {
               </TableCell>
             </TableRow>
           )}
-          {filteredPayments.map((p: any) => (
+                  {filteredPayments.map((p) => (
             <TableRow key={p.id}>
               <TableCell>{p.students?.full_name}</TableCell>
 

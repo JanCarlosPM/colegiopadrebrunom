@@ -118,6 +118,17 @@ const fetchAppUsers = async (): Promise<AppUserRow[]> => {
   return data ?? [];
 };
 
+const fetchEnrollmentPricing = async () => {
+  const { data, error } = await supabase
+    .from("enrollment_pricing")
+    .select("*")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+};
+
 /* ================= COMPONENT ================= */
 
 const Configuracion = () => {
@@ -143,6 +154,11 @@ const Configuracion = () => {
     queryFn: fetchAppUsers,
   });
 
+  const { data: enrollmentPricing } = useQuery({
+    queryKey: ["enrollment-pricing"],
+    queryFn: fetchEnrollmentPricing,
+  });
+
   const [generalForm, setGeneralForm] = useState<SettingsRow>({});
   const [preciosByGrade, setPreciosByGrade] = useState<Record<string, { nio: string; usd: string }>>({});
   const [matriculaNio, setMatriculaNio] = useState("");
@@ -166,8 +182,8 @@ const Configuracion = () => {
         email: settings.email ?? "",
         current_academic_year: settings.current_academic_year ?? new Date().getFullYear(),
         enrollments_open: settings.enrollments_open ?? true,
-        alertas_morosidad: settings.alertas_morosidad ?? true,
-        recordatorios_pago: settings.recordatorios_pago ?? true,
+        alertas_morosidad: (settings as any).alertas_morosidad ?? (settings as any).alerts_morosidad ?? true,
+        recordatorios_pago: (settings as any).recordatorios_pago ?? (settings as any).reminders_pago ?? true,
         reportes_semanales: settings.reportes_semanales ?? false,
         logo_url: settings.logo_url ?? null,
       });
@@ -177,6 +193,16 @@ const Configuracion = () => {
       setMatriculaDiscountEarly(settings.discount_early_enabled ?? false);
     }
   }, [settings]);
+
+  useEffect(() => {
+    if (!enrollmentPricing) return;
+    const amountNio = Number(enrollmentPricing.general_amount ?? 300);
+    const amountUsd = amountNio > 0 ? Number((amountNio / DEFAULT_EXCHANGE_RATE).toFixed(2)) : 8;
+    setMatriculaNio(String(amountNio));
+    setMatriculaUsd(String(amountUsd));
+    setMatriculaDiscountSiblings(Boolean(enrollmentPricing.discount_siblings_enabled));
+    setMatriculaDiscountEarly(Boolean(enrollmentPricing.pronto_pago_enabled));
+  }, [enrollmentPricing]);
 
   useEffect(() => {
     const next: Record<string, { nio: string; usd: string }> = {};
@@ -213,8 +239,8 @@ const Configuracion = () => {
         email: generalForm.email || null,
         current_academic_year: Number(year) || new Date().getFullYear(),
         enrollments_open: generalForm.enrollments_open ?? true,
-        alertas_morosidad: generalForm.alertas_morosidad ?? true,
-        recordatorios_pago: generalForm.recordatorios_pago ?? true,
+        alerts_morosidad: generalForm.alertas_morosidad ?? true,
+        reminders_pago: generalForm.recordatorios_pago ?? true,
         reportes_semanales: generalForm.reportes_semanales ?? false,
         logo_url: generalForm.logo_url || null,
       };
@@ -251,64 +277,58 @@ const Configuracion = () => {
           updated_at: now,
         };
 
-        const oldSchemaPayload = {
-          amount_nio: amountNio,
-          amount_usd: amountUsd,
-          updated_at: now,
-        };
-
         if (existing) {
-          const { error: updateNewSchemaErr } = await supabase
+          const { error: updateErr } = await supabase
             .from("grade_prices")
             .update(newSchemaPayload)
             .eq("id", existing.id);
-
-          if (updateNewSchemaErr) {
-            const { error: updateOldSchemaErr } = await supabase
-              .from("grade_prices")
-              .update(oldSchemaPayload)
-              .eq("id", existing.id);
-
-            if (updateOldSchemaErr) throw updateOldSchemaErr;
-          }
+          if (updateErr) throw updateErr;
         } else {
-          const { error: insertNewSchemaErr } = await supabase
+          const { error: insertErr } = await supabase
             .from("grade_prices")
             .insert({
               grade_id: g.id,
               ...newSchemaPayload,
             });
-
-          if (insertNewSchemaErr) {
-            const { error: insertOldSchemaErr } = await supabase
-              .from("grade_prices")
-              .insert({
-                grade_id: g.id,
-                ...oldSchemaPayload,
-              });
-
-            if (insertOldSchemaErr) throw insertOldSchemaErr;
-          }
+          if (insertErr) throw insertErr;
         }
       }
-      const payload: Partial<SettingsRow> = {
-        matricula_amount_nio: Number(matriculaNio) || 0,
-        matricula_amount_usd: Number(matriculaUsd) || 0,
+
+      // Guardar configuración de matrícula según el esquema disponible.
+      const pricingPayload = {
+        general_amount: Number(matriculaNio) || 0,
+        currency: "NIO",
         discount_siblings_enabled: matriculaDiscountSiblings,
-        discount_early_enabled: matriculaDiscountEarly,
-        current_academic_year: settings?.current_academic_year ?? new Date().getFullYear(),
+        pronto_pago_enabled: matriculaDiscountEarly,
+        updated_at: new Date().toISOString(),
       };
-      if (settings?.id) {
-        const { error } = await supabase.from("school_settings").update(payload).eq("id", settings.id);
-        if (error) throw error;
+
+      const { data: existingPricing, error: pricingReadErr } = await supabase
+        .from("enrollment_pricing")
+        .select("id")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (pricingReadErr) throw pricingReadErr;
+
+      if (existingPricing?.id) {
+        const { error: pricingUpdateErr } = await supabase
+          .from("enrollment_pricing")
+          .update(pricingPayload)
+          .eq("id", existingPricing.id);
+        if (pricingUpdateErr) throw pricingUpdateErr;
       } else {
-        const { error } = await supabase.from("school_settings").insert(payload);
-        if (error) throw error;
+        const { error: pricingInsertErr } = await supabase
+          .from("enrollment_pricing")
+          .insert(pricingPayload);
+        if (pricingInsertErr) throw pricingInsertErr;
       }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["config-settings"] });
       qc.invalidateQueries({ queryKey: ["grade-prices"] });
+      qc.invalidateQueries({ queryKey: ["enrollment-pricing"] });
       toast.success("Precios guardados");
     },
     onError: (e: Error) => toast.error(e.message || "Error al guardar precios"),

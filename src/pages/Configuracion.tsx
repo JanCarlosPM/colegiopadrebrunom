@@ -164,8 +164,6 @@ const Configuracion = () => {
   const [preciosByGrade, setPreciosByGrade] = useState<Record<string, { nio: string; usd: string }>>({});
   const [matriculaNio, setMatriculaNio] = useState("");
   const [matriculaUsd, setMatriculaUsd] = useState("");
-  const [matriculaDiscountSiblings, setMatriculaDiscountSiblings] = useState(true);
-  const [matriculaDiscountEarly, setMatriculaDiscountEarly] = useState(false);
   const [exchangeRate, setExchangeRate] = useState(String(DEFAULT_EXCHANGE_RATE));
 
   const [userDialogOpen, setUserDialogOpen] = useState(false);
@@ -196,8 +194,6 @@ const Configuracion = () => {
       });
       setMatriculaNio(String(settings.matricula_amount_nio ?? 300));
       setMatriculaUsd(String(settings.matricula_amount_usd ?? 8));
-      setMatriculaDiscountSiblings(settings.discount_siblings_enabled ?? true);
-      setMatriculaDiscountEarly(settings.discount_early_enabled ?? false);
     }
   }, [settings]);
 
@@ -207,8 +203,6 @@ const Configuracion = () => {
     const amountUsd = amountNio > 0 ? Number((amountNio / DEFAULT_EXCHANGE_RATE).toFixed(2)) : 8;
     setMatriculaNio(String(amountNio));
     setMatriculaUsd(String(amountUsd));
-    setMatriculaDiscountSiblings(Boolean(enrollmentPricing.discount_siblings_enabled));
-    setMatriculaDiscountEarly(Boolean(enrollmentPricing.pronto_pago_enabled));
   }, [enrollmentPricing]);
 
   useEffect(() => {
@@ -279,10 +273,6 @@ const Configuracion = () => {
         }
       }
 
-      if (!Number.isFinite(Number(matriculaNio)) || Number(matriculaNio) <= 0) {
-        throw new Error("La matrícula en C$ debe ser mayor que cero.");
-      }
-
       for (const g of grades) {
         const vals = preciosByGrade[g.id];
         if (!vals) continue;
@@ -315,47 +305,21 @@ const Configuracion = () => {
         }
       }
 
-      // Guardar configuración de matrícula según el esquema disponible.
-      const pricingPayload = {
-        general_amount: Number(matriculaNio) || 0,
-        currency: "NIO",
-        discount_siblings_enabled: matriculaDiscountSiblings,
-        pronto_pago_enabled: matriculaDiscountEarly,
-        updated_at: new Date().toISOString(),
-      };
-
-      const { data: existingPricing, error: pricingReadErr } = await supabase
-        .from("enrollment_pricing")
-        .select("id")
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (pricingReadErr) throw pricingReadErr;
-
-      if (existingPricing?.id) {
-        const { error: pricingUpdateErr } = await supabase
-          .from("enrollment_pricing")
-          .update(pricingPayload)
-          .eq("id", existingPricing.id);
-        if (pricingUpdateErr) throw pricingUpdateErr;
-      } else {
-        const { error: pricingInsertErr } = await supabase
-          .from("enrollment_pricing")
-          .insert(pricingPayload);
-        if (pricingInsertErr) throw pricingInsertErr;
-      }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config-settings"] });
       qc.invalidateQueries({ queryKey: ["grade-prices"] });
-      qc.invalidateQueries({ queryKey: ["enrollment-pricing"] });
       toast.success("Precios guardados");
     },
     onError: (e: Error) => toast.error(e.message || "Error al guardar precios"),
   });
 
-  const rate = Number(exchangeRate) > 0 ? Number(exchangeRate) : DEFAULT_EXCHANGE_RATE;
+  const parseRate = (value: string) => {
+    const normalized = String(value || "").replace(",", ".");
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_EXCHANGE_RATE;
+  };
+
+  const rate = parseRate(exchangeRate);
   const format2 = (n: number) => Number(n.toFixed(2));
 
   const applyToAllGrades = (nio: number, usd: number) => {
@@ -367,6 +331,103 @@ const Configuracion = () => {
       return next;
     });
   };
+
+  const applyExchangeRateToAll = () => {
+    const safeRate = parseRate(exchangeRate);
+    setPreciosByGrade((prev) => {
+      const next = { ...prev };
+      grades.forEach((g) => {
+        const nio = Number(next[g.id]?.nio || 0);
+        if (Number.isFinite(nio) && nio > 0) {
+          next[g.id] = {
+            nio: String(format2(nio)),
+            usd: String(format2(nio / safeRate)),
+          };
+        }
+      });
+      return next;
+    });
+
+    const currentMatriculaNio = Number(matriculaNio || 0);
+    if (Number.isFinite(currentMatriculaNio) && currentMatriculaNio > 0) {
+      setMatriculaUsd(String(format2(currentMatriculaNio / safeRate)));
+    }
+    toast.success("Tipo de cambio aplicado a los montos actuales.");
+  };
+
+  const saveSingleGradePrice = useMutation({
+    mutationFn: async (grade: GradeRow) => {
+      const vals = preciosByGrade[grade.id];
+      if (!vals) throw new Error("No hay valores para este grado.");
+      const amountNio = Number(vals.nio);
+      const amountUsd = Number(vals.usd);
+      if (!Number.isFinite(amountNio) || amountNio <= 0 || !Number.isFinite(amountUsd) || amountUsd <= 0) {
+        throw new Error(`Precio inválido en "${grade.name}".`);
+      }
+
+      const existing = gradePricesByGradeId.get(grade.id);
+      const payload = {
+        monthly_amount: amountNio,
+        monthly_amount_usd: amountUsd,
+        currency: "NIO",
+        updated_at: new Date().toISOString(),
+      };
+
+      if (existing?.id) {
+        const { error } = await supabase.from("grade_prices").update(payload).eq("id", existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("grade_prices").insert({ grade_id: grade.id, ...payload });
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["grade-prices"] });
+      toast.success("Precio de grado guardado.");
+    },
+    onError: (e: Error) => toast.error(e.message || "Error al guardar el grado"),
+  });
+
+  const saveMatricula = useMutation({
+    mutationFn: async () => {
+      const nio = Number(matriculaNio);
+      const usd = Number(matriculaUsd);
+      if (!Number.isFinite(nio) || nio <= 0) throw new Error("La matrícula en C$ debe ser mayor que cero.");
+      if (!Number.isFinite(usd) || usd <= 0) throw new Error("La matrícula en USD debe ser mayor que cero.");
+
+      const pricingPayload = {
+        general_amount: nio,
+        currency: "NIO",
+        discount_siblings_enabled: false,
+        pronto_pago_enabled: false,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data: existingPricing, error: pricingReadErr } = await supabase
+        .from("enrollment_pricing")
+        .select("id")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (pricingReadErr) throw pricingReadErr;
+
+      if (existingPricing?.id) {
+        const { error } = await supabase
+          .from("enrollment_pricing")
+          .update(pricingPayload)
+          .eq("id", existingPricing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("enrollment_pricing").insert(pricingPayload);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["enrollment-pricing"] });
+      toast.success("Matrícula guardada.");
+    },
+    onError: (e: Error) => toast.error(e.message || "Error al guardar matrícula"),
+  });
 
   const createOrUpdateUser = useMutation({
     mutationFn: async () => {
@@ -806,14 +867,18 @@ const Configuracion = () => {
                         <div>
                           <Label className="input-label">Tipo de cambio (C$ por USD)</Label>
                           <Input
-                            type="number"
-                            min={0.01}
-                            step={0.01}
+                            type="text"
                             className="w-36"
                             value={exchangeRate}
                             onChange={(e) => setExchangeRate(e.target.value)}
                           />
                         </div>
+                        <Button
+                          type="button"
+                          onClick={applyExchangeRateToAll}
+                        >
+                          Aplicar tipo de cambio
+                        </Button>
                         <Button
                           type="button"
                           variant="outline"
@@ -874,6 +939,14 @@ const Configuracion = () => {
                             }}
                           />
                         </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => saveSingleGradePrice.mutate(g)}
+                          disabled={saveSingleGradePrice.isPending}
+                        >
+                          Guardar
+                        </Button>
                       </div>
                     ))}
                     <Button className="w-full mt-4" onClick={() => savePrecios.mutate()} disabled={savePrecios.isPending}>
@@ -888,7 +961,7 @@ const Configuracion = () => {
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">Matrícula</CardTitle>
-                <CardDescription>Monto de matrícula y descuentos</CardDescription>
+                <CardDescription>Monto base de matrícula</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
@@ -910,23 +983,9 @@ const Configuracion = () => {
                     onChange={(e) => setMatriculaUsd(e.target.value)}
                   />
                 </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">Descuento por Hermanos</p>
-                    <p className="text-xs text-muted-foreground">Aplicar descuento por hermanos</p>
-                  </div>
-                  <Switch checked={matriculaDiscountSiblings} onCheckedChange={setMatriculaDiscountSiblings} />
-                </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">Pronto Pago</p>
-                    <p className="text-xs text-muted-foreground">Descuento por pago anticipado</p>
-                  </div>
-                  <Switch checked={matriculaDiscountEarly} onCheckedChange={setMatriculaDiscountEarly} />
-                </div>
-                <Button className="w-full mt-4" onClick={() => savePrecios.mutate()} disabled={savePrecios.isPending}>
-                  {savePrecios.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-                  Guardar Configuración
+                <Button className="w-full mt-4" onClick={() => saveMatricula.mutate()} disabled={saveMatricula.isPending}>
+                  {saveMatricula.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                  Guardar Matrícula
                 </Button>
               </CardContent>
             </Card>

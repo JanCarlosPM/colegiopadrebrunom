@@ -534,8 +534,10 @@ export default function Pagos() {
       subtitle="Control de pagos mensuales"
     >
       {/* TOOLBAR */}
-      <div className="flex flex-col md:flex-row gap-4 mb-6">
-        <div className="relative flex-1">
+      <div className="flex flex-col md:flex-row md:items-end gap-4 mb-6">
+        <div className="flex-1">
+          <label className="text-sm font-medium block mb-1">Buscar</label>
+          <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" />
           <Input
             placeholder="Buscar pagos registrados..."
@@ -543,6 +545,7 @@ export default function Pagos() {
             className="pl-9"
             onChange={(e) => setTableSearch(e.target.value)}
           />
+          </div>
         </div>
 
         <div className="w-full md:w-40">
@@ -570,7 +573,7 @@ export default function Pagos() {
           }}
         >
           <DialogTrigger asChild>
-            <Button>
+            <Button className="h-10">
               <Plus className="mr-2 h-4 w-4" />
               Registrar Mensualidad
             </Button>

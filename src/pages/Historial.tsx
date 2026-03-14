@@ -339,8 +339,8 @@ export default function Historial() {
       subtitle="Vista detallada de matrícula y mensualidades por estudiante"
     >
       {/* FILTROS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="md:col-span-2">
+      <div className="flex flex-col md:flex-row md:items-end gap-4 mb-6">
+        <div className="flex-1">
           <Input
             placeholder="Buscar estudiante por nombre o grado..."
             value={search}
@@ -376,7 +376,7 @@ export default function Historial() {
           )}
         </div>
 
-        <div>
+        <div className="w-full md:w-48">
           <label className="text-sm font-medium">Año lectivo</label>
           <Input
             type="number"

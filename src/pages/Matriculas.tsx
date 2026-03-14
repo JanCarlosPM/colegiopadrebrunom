@@ -27,6 +27,7 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { FormField } from "@/components/common/FormField";
 import {
   DEFAULT_EXCHANGE_RATE,
+  convertCurrency,
   formatMoney,
   normalizeCurrency,
 } from "@/lib/billing";
@@ -573,12 +574,25 @@ export default function Matriculas() {
                         const restante =
                           Number(enrollment.total_amount) -
                           Number(enrollment.paid_amount);
-
-                        const tasa = DEFAULT_EXCHANGE_RATE;
-                        const convertido =
-                          v === "USD" ? restante / tasa : restante * tasa;
-
-                        setSaldoPendiente(Math.max(convertido, 0));
+                        const baseCurrency = normalizeCurrency(enrollment.currency);
+                        const converted =
+                          v === baseCurrency
+                            ? restante
+                            : convertCurrency(
+                                restante,
+                                baseCurrency,
+                                v,
+                                DEFAULT_EXCHANGE_RATE
+                              );
+                        setSaldoPendiente(Math.max(Number(converted.toFixed(2)), 0));
+                      } else {
+                        // Si aún no existe matrícula, usar el precio base según moneda elegida.
+                        const base =
+                          v === "USD"
+                            ? Number(matriculaSettings?.matriculaUsd ?? 8)
+                            : Number(matriculaSettings?.matriculaNio ?? 300);
+                        setSaldoPendiente(Math.max(base, 0));
+                        setTotal(Math.max(base, 0));
                       }
                     }
 

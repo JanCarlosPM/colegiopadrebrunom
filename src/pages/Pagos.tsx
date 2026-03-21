@@ -456,7 +456,7 @@ export default function Pagos() {
         montoDolares: payCurrency === "USD" ? Number(recibidoNum || 0).toFixed(2) : "",
         sumaDe: `${simboloPago} ${Number(appliedInPayCurrency || 0).toFixed(2)}`,
         concepto: `Mensualidad ${MONTHS_ES[(chargeMonth ?? 1) - 1]}`,
-        fecha: new Date(paidAt).toLocaleString("es-NI", {
+        fecha: new Date(paidAt).toLocaleDateString("es-NI", {
           timeZone: "America/Managua",
         }),
       });
@@ -878,7 +878,7 @@ export default function Pagos() {
                         montoDolares: p.currency === "USD" ? Number(p.received_amount || 0).toFixed(2) : "",
                         sumaDe: `${simbolo} ${Number(p.amount || 0).toFixed(2)}`,
                         concepto: `Mensualidad ${MONTHS_ES[p.month - 1] ?? p.month}`,
-                        fecha: new Date(p.paid_at).toLocaleString("es-NI", {
+                        fecha: new Date(p.paid_at).toLocaleDateString("es-NI", {
                           timeZone: "America/Managua",
                         }),
                       })

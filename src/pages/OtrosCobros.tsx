@@ -66,6 +66,13 @@ type AppUser = {
   is_active: boolean;
 };
 
+/** El rol en `app_users` puede venir con distinto casing desde la BD. */
+function isAdminRole(role: string | undefined | null): boolean {
+  return String(role ?? "")
+    .trim()
+    .toLowerCase() === "administrador";
+}
+
 type OtherPaymentRow = {
   id: string;
   item_name: string | null;
@@ -175,7 +182,7 @@ export default function OtrosCobros() {
 
   const { data: students = [] } = useQuery({ queryKey: ["students-active"], queryFn: fetchStudents });
   const { data: items = [], error: itemsError } = useQuery({ queryKey: ["payment-items"], queryFn: fetchItems, retry: false });
-  const { data: currentAppUser } = useQuery({
+  const { data: currentAppUser, isLoading: isLoadingAppUser } = useQuery({
     queryKey: ["current-app-user"],
     queryFn: fetchCurrentAppUser,
     retry: false,
@@ -322,7 +329,7 @@ export default function OtrosCobros() {
       setTimeout(() => {
         imprimirReciboOficial({
           numero: String(ctx.id).slice(-5),
-          fecha: new Date(ctx.paymentDate).toLocaleString("es-NI", {
+          fecha: new Date(ctx.paymentDate).toLocaleDateString("es-NI", {
             timeZone: "America/Managua",
           }),
           estudiante: ctx.student.full_name,
@@ -394,7 +401,10 @@ export default function OtrosCobros() {
           }}
         >
           <DialogTrigger asChild>
-            <Button variant="outline" disabled={schemaNotReady || !canManageItems}>
+            <Button
+              variant="outline"
+              disabled={schemaNotReady || isLoadingAppUser || !canManageItems}
+            >
               <Plus className="h-4 w-4 mr-2" />
               Nuevo Concepto
             </Button>
@@ -661,12 +671,6 @@ export default function OtrosCobros() {
         </Dialog>
       </div>
 
-      {!schemaNotReady && !canManageItems && (
-        <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
-          Tu rol actual no puede crear conceptos nuevos. Sí puedes registrar pagos usando conceptos existentes.
-        </div>
-      )}
-
       <Table>
         <TableHeader>
           <TableRow>
@@ -678,7 +682,7 @@ export default function OtrosCobros() {
             <TableHead>Cambio</TableHead>
             <TableHead>Estado</TableHead>
             <TableHead>Fecha</TableHead>
-            <TableHead className="w-[52px] text-center">Recibo</TableHead>
+            <TableHead className="w-14 min-w-[3rem] text-center">Recibo</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -701,9 +705,49 @@ export default function OtrosCobros() {
                 <StatusBadge status={p.status} />
               </TableCell>
               <TableCell>
-                {new Date(p.payment_date).toLocaleString("es-NI", {
+                {new Date(p.payment_date).toLocaleDateString("es-NI", {
                   timeZone: "America/Managua",
                 })}
+              </TableCell>
+              <TableCell className="text-center align-middle">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className="shrink-0"
+                  title="Imprimir recibo"
+                  aria-label="Imprimir recibo"
+                  onClick={() => {
+                    const simbolo = p.currency === "USD" ? "$" : "C$";
+                    const conceptoBase = p.item_name ?? p.payment_items?.name ?? "Otro cobro";
+                    const concepto =
+                      p.notes && String(p.notes).trim().length > 0
+                        ? `${conceptoBase} — ${String(p.notes).trim()}`
+                        : conceptoBase;
+                    imprimirReciboOficial({
+                      numero: String(p.id).slice(-5),
+                      fecha: new Date(p.payment_date).toLocaleDateString("es-NI", {
+                        timeZone: "America/Managua",
+                      }),
+                      estudiante: p.students?.full_name ?? "—",
+                      grado: p.students?.grades?.name ?? "",
+                      anio: String(year),
+                      nivel: p.students?.sections?.name ?? "",
+                      montoCordobas:
+                        p.currency === "NIO"
+                          ? Number(p.received_amount || 0).toFixed(2)
+                          : "",
+                      montoDolares:
+                        p.currency === "USD"
+                          ? Number(p.received_amount || 0).toFixed(2)
+                          : "",
+                      sumaDe: `${simbolo} ${Number(p.amount || 0).toFixed(2)}`,
+                      concepto,
+                    });
+                  }}
+                >
+                  <Printer className="h-4 w-4" aria-hidden />
+                </Button>
               </TableCell>
             </TableRow>
           ))}

@@ -21,6 +21,7 @@ import {
 import { Plus, Printer, Search } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateFinancialViews } from "@/lib/queryKeys";
 import { toast } from "sonner";
 import {
   MONTHS_ES,
@@ -437,8 +438,7 @@ export default function Pagos() {
     },
 
     onSuccess: async ({ paidAt, chargeMonth, appliedInPayCurrency }) => {
-      await qc.invalidateQueries({ queryKey: ["payments", year] });
-      await qc.invalidateQueries({ queryKey: ["dashboard"] });
+      await invalidateFinancialViews(qc, { year });
 
       if (selectedCharge?.student_id) {
         await loadStudentOpenCharges(selectedCharge.student_id);

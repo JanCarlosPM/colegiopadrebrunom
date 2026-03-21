@@ -28,7 +28,24 @@ const navigation = [
   { name: "Historial", href: "/historial", icon: History },
   { name: "Reportes", href: "/reportes", icon: FileText },
   { name: "Configuración", href: "/configuracion", icon: Settings },
-];
+] as const;
+
+/** Precarga el chunk de la ruta al pasar el cursor (mejor perceived performance). */
+const prefetchRouteModule = (href: string) => {
+  const loaders: Record<string, () => Promise<unknown>> = {
+    "/dashboard": () => import("@/pages/Dashboard"),
+    "/estudiantes": () => import("@/pages/Estudiantes"),
+    "/matriculas": () => import("@/pages/Matriculas"),
+    "/pagos": () => import("@/pages/Pagos"),
+    "/otros-cobros": () => import("@/pages/OtrosCobros"),
+    "/importaciones": () => import("@/pages/Importaciones"),
+    "/historial": () => import("@/pages/Historial"),
+    "/reportes": () => import("@/pages/Reportes"),
+    "/configuracion": () => import("@/pages/Configuracion"),
+  };
+  const fn = loaders[href];
+  if (fn) void fn();
+};
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
@@ -67,8 +84,10 @@ export function Sidebar() {
         <Button
           variant="ghost"
           size="icon"
+          type="button"
           onClick={() => setCollapsed(!collapsed)}
           className="h-8 w-8 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent shrink-0"
+          aria-label={collapsed ? "Expandir menú lateral" : "Contraer menú lateral"}
         >
           {collapsed ? (
             <ChevronRight className="h-4 w-4" />
@@ -88,6 +107,8 @@ export function Sidebar() {
               to={item.href}
               className={cn("nav-item", isActive && "nav-item-active")}
               title={collapsed ? item.name : undefined}
+              onFocus={() => prefetchRouteModule(item.href)}
+              onMouseEnter={() => prefetchRouteModule(item.href)}
             >
               <item.icon className="h-5 w-5 shrink-0" />
               {!collapsed && <span className="truncate">{item.name}</span>}

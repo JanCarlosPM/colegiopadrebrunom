@@ -28,6 +28,7 @@ import {
 import { Plus, Search, Pencil, Power, RotateCcw } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateFinancialViews } from "@/lib/queryKeys";
 import { toast } from "sonner";
 
 type GuardianRow = { id: string; full_name: string | null; phone: string | null };
@@ -201,8 +202,9 @@ export default function Estudiantes() {
         throw studentError;
       }
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["students"] });
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["students"] });
+      await invalidateFinancialViews(qc);
       setOpenAdd(false);
       setForm(emptyForm);
       setSelectedGradeId("");
@@ -255,8 +257,9 @@ export default function Estudiantes() {
 
       if (guardianError) throw guardianError;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["students"] });
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["students"] });
+      await invalidateFinancialViews(qc);
       setOpenEdit(false);
       setForm(emptyForm);
       setSelectedGradeId("");
@@ -288,8 +291,10 @@ export default function Estudiantes() {
     onMutate: async ({ id }) => {
       setTogglingStudentId(id);
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["students"] });
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["students"] });
+      await qc.invalidateQueries({ queryKey: ["students-active"] });
+      await invalidateFinancialViews(qc);
       toast.success("Estado del estudiante actualizado.");
     },
     onError: () => {

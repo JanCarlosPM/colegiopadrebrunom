@@ -22,6 +22,7 @@ import {
 import { Plus, User } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateFinancialViews } from "@/lib/queryKeys";
 import { imprimirReciboMatricula } from "@/utils/imprimirReciboMatricula";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { FormField } from "@/components/common/FormField";
@@ -403,7 +404,7 @@ export default function Matriculas() {
     },
 
     onSuccess: async (result) => {
-      await qc.invalidateQueries({ queryKey: ["matriculas", year] });
+      await invalidateFinancialViews(qc, { year });
 
       setOpenAdd(false);
 

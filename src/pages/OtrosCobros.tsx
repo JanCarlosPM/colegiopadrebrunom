@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/select";
 import { Plus } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateFinancialViews } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
 import { formatMoney, normalizeCurrency } from "@/lib/billing";
 import { toast } from "sonner";
@@ -271,8 +272,9 @@ export default function OtrosCobros() {
       });
       if (error) throw error;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["other-payments", year] });
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["other-payments", year] });
+      await invalidateFinancialViews(qc, { year });
       toast.success("Pago registrado correctamente");
       setOpenPayment(false);
       setPaymentForm({

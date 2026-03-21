@@ -1,15 +1,10 @@
 import { Suspense, lazy } from "react";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import {
-  MutationCache,
-  QueryCache,
-  QueryClient,
-  QueryClientProvider,
-} from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
-import { supabase } from "@/lib/supabase";
+import { createAppQueryClient } from "@/lib/queryClient";
 
 const Login = lazy(() => import("./pages/Login"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -24,46 +19,7 @@ const Configuracion = lazy(() => import("./pages/Configuracion"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
-type AuthErrorLike = {
-  message?: string;
-  details?: string;
-  code?: string;
-  status?: number;
-};
-
-const isJwtExpiredError = (error: unknown) => {
-  const err = (error ?? {}) as AuthErrorLike;
-  const raw = String(err.message || err.details || "").toLowerCase();
-  return (
-    raw.includes("jwt expired") ||
-    err.code === "PGRST301" ||
-    err.status === 401
-  );
-};
-
-const forceRelogin = async () => {
-  await supabase.auth.signOut();
-  if (window.location.pathname !== "/login") {
-    window.location.replace("/login");
-  }
-};
-
-const queryClient = new QueryClient({
-  queryCache: new QueryCache({
-    onError: (error) => {
-      if (isJwtExpiredError(error)) {
-        void forceRelogin();
-      }
-    },
-  }),
-  mutationCache: new MutationCache({
-    onError: (error) => {
-      if (isJwtExpiredError(error)) {
-        void forceRelogin();
-      }
-    },
-  }),
-});
+const queryClient = createAppQueryClient();
 
 const App = () => {
   return (

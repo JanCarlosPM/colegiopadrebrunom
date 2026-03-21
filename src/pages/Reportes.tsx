@@ -39,6 +39,7 @@ const REPORT_TYPES: { value: string; label: string; category: keyof typeof REPOR
   { value: "matriculas-por-estado", label: "Matrículas por estado", category: "matriculas" },
   { value: "mensualidades", label: "Cargos de mensualidad", category: "mensualidades" },
   { value: "pagos", label: "Pagos registrados", category: "financiero" },
+  { value: "arqueo-dia", label: "Arqueo del día (pagos)", category: "financiero" },
   { value: "ingresos-por-mes", label: "Ingresos por mes", category: "financiero" },
   { value: "caja", label: "Movimientos de caja", category: "financiero" },
   { value: "devoluciones", label: "Devoluciones (cambio)", category: "financiero" },
@@ -100,12 +101,26 @@ type PaymentReportRow = {
   created_at?: string | null;
 };
 
+type OtherPaymentReportRow = {
+  id: string;
+  student_id: string;
+  item_name?: string | null;
+  amount?: number | null;
+  received_amount?: number | null;
+  change_amount?: number | null;
+  currency?: string | null;
+  status?: string | null;
+  payment_date?: string | null;
+  created_at?: string | null;
+};
+
 type ReportRow = Record<string, string | number | null | undefined>;
 
 const EMPTY_STUDENTS: StudentReportRow[] = [];
 const EMPTY_ENROLLMENTS: EnrollmentReportRow[] = [];
 const EMPTY_CHARGES: ChargeReportRow[] = [];
 const EMPTY_PAYMENTS: PaymentReportRow[] = [];
+const EMPTY_OTHER_PAYMENTS: OtherPaymentReportRow[] = [];
 
 /* ================= FETCH ================= */
 
@@ -114,6 +129,7 @@ const fetchReportData = async (): Promise<{
   enrollments: EnrollmentReportRow[];
   charges: ChargeReportRow[];
   payments: PaymentReportRow[];
+  otherPayments: OtherPaymentReportRow[];
 }> => {
   const [studentsRes, enrollmentsRes, chargesRes, paymentsRes] = await Promise.all([
     supabase.from("students").select(`
@@ -170,11 +186,34 @@ const fetchReportData = async (): Promise<{
   if (chargesRes.error) throw chargesRes.error;
   if (paymentsRes.error) throw paymentsRes.error;
 
+  // Otros cobros puede no existir en instalaciones antiguas.
+  let otherPayments: OtherPaymentReportRow[] = [];
+  const otherPaymentsRes = await supabase.from("other_payments").select(`
+    id,
+    student_id,
+    item_name,
+    amount,
+    received_amount,
+    change_amount,
+    currency,
+    status,
+    payment_date,
+    created_at
+  `);
+  if (otherPaymentsRes.error) {
+    if ((otherPaymentsRes.error as { code?: string }).code !== "42P01") {
+      throw otherPaymentsRes.error;
+    }
+  } else {
+    otherPayments = (otherPaymentsRes.data ?? []) as OtherPaymentReportRow[];
+  }
+
   return {
     students: (studentsRes.data ?? []) as StudentReportRow[],
     enrollments: (enrollmentsRes.data ?? []) as EnrollmentReportRow[],
     charges: (chargesRes.data ?? []) as ChargeReportRow[],
     payments: (paymentsRes.data ?? []) as PaymentReportRow[],
+    otherPayments,
   };
 };
 
@@ -190,6 +229,7 @@ export default function Reportes() {
   const enrollments = data?.enrollments ?? EMPTY_ENROLLMENTS;
   const charges = data?.charges ?? EMPTY_CHARGES;
   const payments = data?.payments ?? EMPTY_PAYMENTS;
+  const otherPayments = data?.otherPayments ?? EMPTY_OTHER_PAYMENTS;
 
   const [tipoReporte, setTipoReporte] = useState("resumen-ejecutivo");
   const [grado, setGrado] = useState("todos");
@@ -515,6 +555,124 @@ export default function Reportes() {
       return rows;
     }
 
+    if (tipoReporte === "arqueo-dia") {
+      const dateKeyInManagua = (value?: string | null) => {
+        if (!value) return "";
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return "";
+        return new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Managua",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(d);
+      };
+      const timeInManagua = (value?: string | null) => {
+        if (!value) return "—";
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return "—";
+        return new Intl.DateTimeFormat("es-NI", {
+          timeZone: "America/Managua",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+        }).format(d);
+      };
+
+      const todayKey = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Managua",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+
+      const movimientos: ReportRow[] = [];
+      let totalAplicadoNio = 0;
+      let totalAplicadoUsd = 0;
+      let totalRecibidoNio = 0;
+      let totalRecibidoUsd = 0;
+      let totalCambioNio = 0;
+      let totalCambioUsd = 0;
+
+      payments
+        .filter((p) => dateKeyInManagua(p.paid_at) === todayKey)
+        .forEach((p) => {
+          const s = studentsById.get(p.student_id);
+          const aplicado = Number(p.amount || 0);
+          const recibido = Number(p.received_amount ?? p.amount ?? 0);
+          const cambio = Number(p.change_amount || 0);
+          const moneda = normalizeCurrency(p.currency);
+          if (moneda === "USD") {
+            totalAplicadoUsd += aplicado;
+            totalRecibidoUsd += recibido;
+            totalCambioUsd += cambio;
+          } else {
+            totalAplicadoNio += aplicado;
+            totalRecibidoNio += recibido;
+            totalCambioNio += cambio;
+          }
+          movimientos.push({
+            hora: timeInManagua(p.paid_at),
+            origen: "Mensualidades/Matrícula",
+            estudiante: s?.full_name ?? "—",
+            concepto: p.concept ?? "—",
+            moneda,
+            aplicado: aplicado.toFixed(2),
+            recibido: recibido.toFixed(2),
+            cambio: cambio.toFixed(2),
+          });
+        });
+
+      otherPayments
+        .filter((p) => dateKeyInManagua(p.payment_date) === todayKey)
+        .forEach((p) => {
+          const s = studentsById.get(p.student_id);
+          const aplicado = Number(p.amount || 0);
+          const recibido = Number(p.received_amount ?? p.amount ?? 0);
+          const cambio = Number(p.change_amount || 0);
+          const moneda = normalizeCurrency(p.currency);
+          if (moneda === "USD") {
+            totalAplicadoUsd += aplicado;
+            totalRecibidoUsd += recibido;
+            totalCambioUsd += cambio;
+          } else {
+            totalAplicadoNio += aplicado;
+            totalRecibidoNio += recibido;
+            totalCambioNio += cambio;
+          }
+          movimientos.push({
+            hora: timeInManagua(p.payment_date),
+            origen: "Otros cobros",
+            estudiante: s?.full_name ?? "—",
+            concepto: p.item_name ?? "Otro cobro",
+            moneda,
+            aplicado: aplicado.toFixed(2),
+            recibido: recibido.toFixed(2),
+            cambio: cambio.toFixed(2),
+          });
+        });
+
+      movimientos.sort((a, b) => String(a.hora ?? "").localeCompare(String(b.hora ?? "")));
+
+      const netoNio = totalRecibidoNio - totalCambioNio;
+      const netoUsd = totalRecibidoUsd - totalCambioUsd;
+
+      return [
+        {
+          hora: "—",
+          origen: "TOTAL DÍA",
+          estudiante: "—",
+          concepto: `${todayKey} (Managua)`,
+          moneda: "NIO/USD",
+          aplicado: `C$ ${totalAplicadoNio.toFixed(2)} | $ ${totalAplicadoUsd.toFixed(2)}`,
+          recibido: `C$ ${totalRecibidoNio.toFixed(2)} | $ ${totalRecibidoUsd.toFixed(2)}`,
+          cambio: `C$ ${totalCambioNio.toFixed(2)} | $ ${totalCambioUsd.toFixed(2)} | Neto C$ ${netoNio.toFixed(2)} / $ ${netoUsd.toFixed(2)}`,
+        },
+        ...movimientos,
+      ];
+    }
+
     if (tipoReporte === "solventes") {
       return filteredStudents
         .map((s) => {
@@ -599,6 +757,7 @@ export default function Reportes() {
     chargesInYear,
     paymentsInYear,
     payments,
+    otherPayments,
     studentsById,
     year,
     mes,
@@ -683,7 +842,7 @@ export default function Reportes() {
   );
 
   const showDateRange = tipoReporte === "caja" || tipoReporte === "devoluciones";
-  const showMes = !["resumen-ejecutivo", "estudiantes-por-grado", "matriculas-por-estado", "ingresos-por-mes", "estudiantes", "pendientes"].includes(tipoReporte);
+  const showMes = !["resumen-ejecutivo", "estudiantes-por-grado", "matriculas-por-estado", "ingresos-por-mes", "estudiantes", "pendientes", "arqueo-dia"].includes(tipoReporte);
 
   return (
     <DashboardLayout title="Reportes" subtitle="Generar reportes de estudiantes, matrículas, ingresos y morosidad">

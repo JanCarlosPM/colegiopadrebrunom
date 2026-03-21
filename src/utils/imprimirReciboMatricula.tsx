@@ -440,15 +440,15 @@ function ReciboPreimpresoTemplate({
     numero: { top: "9.5%", left: "86.2%" },
     // Ajuste fino con base en vista previa real del navegador:
     // se desplazaron ~6-7% hacia arriba para alinear con los renglones impresos.
-    grado: { top: "43.0%", left: "8.5%" },
-    anio: { top: "43.0%", left: "38.5%" },
-    nivel: { top: "43.0%", left: "62.5%" },
-    fecha: { top: "50.8%", left: "8.5%" },
-    cordobas: { top: "50.8%", left: "75.5%" },
-    dolares: { top: "57.6%", left: "75.5%" },
-    recibimosDe: { top: "57.6%", left: "18%" },
-    sumaDe: { top: "64.7%", left: "14.5%" },
-    concepto: { top: "71.8%", left: "18.8%" },
+    grado: { top: "41.8%", left: "8.5%" },
+    anio: { top: "41.8%", left: "38.5%" },
+    nivel: { top: "41.8%", left: "62.5%" },
+    fecha: { top: "48.9%", left: "8.5%" },
+    cordobas: { top: "48.9%", left: "75.5%" },
+    dolares: { top: "55.8%", left: "75.5%" },
+    recibimosDe: { top: "55.8%", left: "18%" },
+    sumaDe: { top: "62.7%", left: "14.5%" },
+    concepto: { top: "69.6%", left: "18.8%" },
   } as const;
 
   return (
@@ -478,26 +478,26 @@ function ReciboPreimpresoTemplate({
       >
         {numero}
       </div>
-      <div style={{ position: "absolute", top: pos.grado.top, left: pos.grado.left, width: "24%", fontSize: 16 }}>{grado}</div>
+      <div style={{ position: "absolute", top: pos.grado.top, left: pos.grado.left, width: "24%", fontSize: 15 }}>{grado}</div>
       <div
         style={{
           position: "absolute",
           top: pos.anio.top,
           left: pos.anio.left,
           width: "18%",
-          fontSize: 16,
+          fontSize: 15,
           textAlign: "center",
         }}
       >
         {anio}
       </div>
-      <div style={{ position: "absolute", top: pos.nivel.top, left: pos.nivel.left, width: "30%", fontSize: 16 }}>{nivel}</div>
-      <div style={{ position: "absolute", top: pos.fecha.top, left: pos.fecha.left, width: "42%", fontSize: 16 }}>{fecha}</div>
-      <div style={{ position: "absolute", top: pos.cordobas.top, left: pos.cordobas.left, width: "18%", fontSize: 16 }}>{montoCordobas}</div>
-      <div style={{ position: "absolute", top: pos.dolares.top, left: pos.dolares.left, width: "18%", fontSize: 16 }}>{montoDolares}</div>
-      <div style={{ position: "absolute", top: pos.recibimosDe.top, left: pos.recibimosDe.left, width: "73%", fontSize: 16 }}>{estudiante}</div>
-      <div style={{ position: "absolute", top: pos.sumaDe.top, left: pos.sumaDe.left, width: "76%", fontSize: 16 }}>{sumaDe}</div>
-      <div style={{ position: "absolute", top: pos.concepto.top, left: pos.concepto.left, width: "70%", fontSize: 16 }}>{concepto}</div>
+      <div style={{ position: "absolute", top: pos.nivel.top, left: pos.nivel.left, width: "30%", fontSize: 15 }}>{nivel}</div>
+      <div style={{ position: "absolute", top: pos.fecha.top, left: pos.fecha.left, width: "42%", fontSize: 15 }}>{fecha}</div>
+      <div style={{ position: "absolute", top: pos.cordobas.top, left: pos.cordobas.left, width: "18%", fontSize: 15 }}>{montoCordobas}</div>
+      <div style={{ position: "absolute", top: pos.dolares.top, left: pos.dolares.left, width: "18%", fontSize: 15 }}>{montoDolares}</div>
+      <div style={{ position: "absolute", top: pos.recibimosDe.top, left: pos.recibimosDe.left, width: "73%", fontSize: 15 }}>{estudiante}</div>
+      <div style={{ position: "absolute", top: pos.sumaDe.top, left: pos.sumaDe.left, width: "76%", fontSize: 15 }}>{sumaDe}</div>
+      <div style={{ position: "absolute", top: pos.concepto.top, left: pos.concepto.left, width: "70%", fontSize: 15 }}>{concepto}</div>
     </div>
   );
 }

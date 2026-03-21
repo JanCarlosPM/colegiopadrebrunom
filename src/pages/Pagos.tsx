@@ -699,7 +699,7 @@ export default function Pagos() {
                             onChange={(e) =>
                               setForm({
                                 ...form,
-                                pay_currency: e.target.value,
+                                pay_currency: e.target.value as "NIO" | "USD",
                                 recibido: "",
                               })
                             }

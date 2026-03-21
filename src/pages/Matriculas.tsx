@@ -23,6 +23,7 @@ import { Plus, User } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invalidateFinancialViews } from "@/lib/queryKeys";
+import type { Tables } from "@/types/database.types";
 import { imprimirReciboMatricula } from "@/utils/imprimirReciboMatricula";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { FormField } from "@/components/common/FormField";
@@ -259,7 +260,7 @@ export default function Matriculas() {
 
       const now = new Date().toISOString();
 
-      const { data: existing, error: existingError } = await supabase
+      const { data: existingRaw, error: existingError } = await supabase
         .from("enrollments")
         .select("*")
         .eq("student_id", selectedStudent.id)
@@ -267,6 +268,7 @@ export default function Matriculas() {
         .maybeSingle();
 
       if (existingError) throw existingError;
+      const existing = existingRaw as Tables<"enrollments"> | null;
 
       let montoAplicado = 0;
       let cambioPago = 0;
@@ -276,11 +278,13 @@ export default function Matriculas() {
         const gradeId = selectedStudent?.grade_id;
         if (!gradeId) return;
 
-        const { data: priceRow } = await supabase
+        const { data: priceRowRaw } = await supabase
           .from("grade_prices")
           .select("*")
           .eq("grade_id", gradeId)
           .maybeSingle();
+
+        const priceRow = priceRowRaw as Tables<"grade_prices"> | null;
 
         const amountNio = Number(priceRow?.monthly_amount ?? 770);
 
@@ -501,12 +505,14 @@ export default function Matriculas() {
                       key={s.id}
                       className="p-3 hover:bg-muted cursor-pointer flex gap-2 border-b last:border-b-0"
                       onClick={async () => {
-                        const { data: existing } = await supabase
+                        const { data: existingRaw } = await supabase
                           .from("enrollments")
                           .select("*")
                           .eq("student_id", s.id)
                           .eq("academic_year", year)
                           .maybeSingle();
+
+                        const existing = existingRaw as Tables<"enrollments"> | null;
 
                         if (existing) {
                           const totalOriginal = Number(existing.total_amount);

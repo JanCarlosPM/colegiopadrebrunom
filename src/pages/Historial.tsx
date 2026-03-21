@@ -150,8 +150,8 @@ export default function Historial() {
     if (chargesError) console.error("Error charges:", chargesError);
 
     setEnrollment(enrollmentData || null);
-    setPayments(paymentsData || []);
-    setCharges(chargesData || []);
+    setPayments((paymentsData ?? []) as PaymentRow[]);
+    setCharges((chargesData ?? []) as ChargeRow[]);
     setLoadingHistory(false);
   };
 

@@ -45,8 +45,25 @@
 - **RLS** y políticas viven en Supabase (no en el repo completo). El anon key solo debe usarse con RLS correcta
 - Tras caducidad de JWT, las queries/mutations disparan cierre de sesión y redirección a `/login`
 
+## TypeScript
+
+- **App completa**: `npm run typecheck` → `tsc -p tsconfig.app.json` (modo permisivo heredado en `tsconfig.app.json`).
+- **Núcleo estricto** (`src/lib`, `src/services`, `src/hooks`, `src/types`): `npm run typecheck:strict` → `tsconfig.core.json` con `strict`, `strictNullChecks` y `noImplicitAny`. Ampliar carpetas allí cuando estabilicemos más módulos.
+
+## Tipos de Supabase
+
+- Cliente en `src/lib/supabase.ts`: `createClient<Database>(...)`.
+- Definición actual: `src/types/database.types.ts` (mantenida a mano si no hay CLI enlazado).
+- **Regenerar desde la nube** (proyecto enlazado o `SUPABASE_PROJECT_ID`):
+
+  ```bash
+  npm run db:types
+  ```
+
+  Requiere `npx supabase link` o variable de entorno `SUPABASE_PROJECT_ID`. Con Docker local: `npx supabase gen types typescript --local`.
+
 ## Próximos pasos recomendados
 
-1. Generar tipos de BD: `supabase gen types typescript` y tipar `createClient<Database>()`
-2. Tests de integración ligados a contratos de API (mock de Supabase)
-3. Virtualización en tablas muy largas (`@tanstack/react-virtual`) si el volumen lo exige
+1. Ampliar `tsconfig.core.json` → incluir `src/components/common` o páginas concretas al ir corrigiendo tipos.
+2. Tests de integración ligados a contratos de API (mock de Supabase).
+3. Virtualización en tablas muy largas (`@tanstack/react-virtual`) si el volumen lo exige.

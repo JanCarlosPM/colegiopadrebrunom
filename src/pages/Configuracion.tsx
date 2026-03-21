@@ -44,6 +44,7 @@ import { GraduationCap, Plus, Edit, Trash2, Save, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import type { Tables } from "@/types/database.types";
 
 /* ================= TIPOS ================= */
 
@@ -76,6 +77,14 @@ type GradePriceRow = {
   currency?: string | null;
 };
 type AppUserRow = { id: string; email: string; full_name: string | null; role: string; is_active: boolean };
+
+type UserFormState = {
+  full_name: string;
+  email: string;
+  role: "Cobrador" | "Administrador";
+  password: string;
+  is_active: boolean;
+};
 type LegacySettingsRow = SettingsRow & {
   alerts_morosidad?: boolean | null;
   reminders_pago?: boolean | null;
@@ -111,7 +120,7 @@ const fetchGrades = async (): Promise<GradeRow[]> => {
 const fetchGradePrices = async (): Promise<GradePriceRow[]> => {
   const { data, error } = await supabase.from("grade_prices").select("*");
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as GradePriceRow[];
 };
 
 const fetchAppUsers = async (): Promise<AppUserRow[]> => {
@@ -123,7 +132,7 @@ const fetchAppUsers = async (): Promise<AppUserRow[]> => {
   return data ?? [];
 };
 
-const fetchEnrollmentPricing = async () => {
+const fetchEnrollmentPricing = async (): Promise<Tables<"enrollment_pricing"> | null> => {
   const { data, error } = await supabase
     .from("enrollment_pricing")
     .select("*")
@@ -131,7 +140,7 @@ const fetchEnrollmentPricing = async () => {
     .limit(1)
     .maybeSingle();
   if (error) throw error;
-  return data;
+  return data as Tables<"enrollment_pricing"> | null;
 };
 
 /* ================= COMPONENT ================= */
@@ -172,7 +181,13 @@ const Configuracion = () => {
 
   const [userDialogOpen, setUserDialogOpen] = useState(false);
   const [userEditId, setUserEditId] = useState<string | null>(null);
-  const [userForm, setUserForm] = useState({ full_name: "", email: "", role: "Cobrador" as const, password: "", is_active: true });
+  const [userForm, setUserForm] = useState<UserFormState>({
+    full_name: "",
+    email: "",
+    role: "Cobrador",
+    password: "",
+    is_active: true,
+  });
   const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
 
   const gradePricesByGradeId = useMemo(() => {
@@ -482,7 +497,13 @@ const Configuracion = () => {
       qc.invalidateQueries({ queryKey: ["app-users"] });
       setUserDialogOpen(false);
       setUserEditId(null);
-      setUserForm({ full_name: "", email: "", role: "Cobrador", password: "", is_active: true });
+      setUserForm({
+        full_name: "",
+        email: "",
+        role: "Cobrador",
+        password: "",
+        is_active: true,
+      });
       toast.success(userEditId ? "Usuario actualizado" : "Usuario creado");
     },
     onError: (e: Error) => toast.error(e.message || "Error al guardar usuario"),

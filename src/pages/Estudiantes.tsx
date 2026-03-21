@@ -181,10 +181,11 @@ export default function Estudiantes() {
           full_name: form.guardian_name,
           phone: form.guardian_phone,
         })
-        .select()
+        .select("id")
         .single();
 
       if (error) throw error;
+      if (!guardian?.id) throw new Error("No se pudo crear el tutor.");
 
       const { error: studentError } = await supabase
         .from("students")
@@ -756,7 +757,7 @@ export default function Estudiantes() {
                   </label>
                   <Select
                     value={form.status || "ACTIVO"}
-                    onValueChange={(v) => onChange("status", v)}
+                    onValueChange={(v) => onChange("status", v as "ACTIVO" | "INACTIVO")}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Estado" />

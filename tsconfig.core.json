@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "strict": true,
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": [
+    "src/vite-env.d.ts",
+    "src/lib/**/*.ts",
+    "src/services/**/*.ts",
+    "src/hooks/**/*.ts",
+    "src/types/**/*.ts"
+  ],
+  "exclude": ["**/__tests__/**", "**/*.test.ts"]
+}

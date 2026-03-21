@@ -96,7 +96,7 @@ const fetchItems = async (): Promise<PaymentItem[]> => {
     .select("id, name, category, default_amount, currency, is_active")
     .order("name");
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as PaymentItem[];
 };
 
 const fetchCurrentAppUser = async (): Promise<AppUser | null> => {
@@ -111,7 +111,11 @@ const fetchCurrentAppUser = async (): Promise<AppUser | null> => {
     .eq("id", userId)
     .maybeSingle();
   if (error) throw error;
-  return data;
+  if (!data) return null;
+  return {
+    ...data,
+    role: data.role as AppUser["role"],
+  };
 };
 
 const fetchOtherPayments = async (year: number): Promise<OtherPaymentRow[]> => {

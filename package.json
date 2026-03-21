@@ -10,7 +10,10 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit",
+    "typecheck:strict": "tsc -p tsconfig.core.json --noEmit",
+    "db:types": "node scripts/gen-supabase-types.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.2.8",

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 /** Azul institucional cercano al recibo impreso original */
 const INK_BLUE = "#1a5490";
 const INK_RED = "#c40000";
+const PREIMPRESO_BG_URL = "/recibocolegio.jpg";
 
 export type ReciboOficialData = {
   numero?: string;
@@ -454,8 +455,9 @@ function ReciboPreimpresoTemplate({
         position: "relative",
         width: "100%",
         height: "100%",
-        backgroundImage: "url('/recibo-colegio.png')",
-        backgroundSize: "cover",
+        backgroundImage: `url('${PREIMPRESO_BG_URL}')`,
+        backgroundSize: "100% 100%",
+        backgroundPosition: "center",
         backgroundRepeat: "no-repeat",
         fontFamily: "Arial, sans-serif",
         color: "#0f3f78",
@@ -684,21 +686,38 @@ function getShellHtml(layout: ReciboPrintLayout, title: string): string {
         <title>${title}</title>
         ${fonts}
         <style>
-          html, body { margin: 0; padding: 0; background: white; width: 8.5in; height: 5.5in; }
-          body { display: flex; justify-content: flex-start; align-items: flex-start; flex-direction: column; }
-          #print-root { width: 8.5in; height: 5.5in; }
-          @page { size: 8.5in 5.5in; margin: 0; }
-          .no-print { padding: 10px; text-align: center; font-family: system-ui, sans-serif; background: #f1f5f9; border-bottom: 1px solid #cbd5e1; width: 100%; box-sizing: border-box; }
+          * { box-sizing: border-box; }
+          html, body { margin: 0; padding: 0; background: #cbd5e1; }
+          @page { size: letter portrait; margin: 0.22in; }
+          #wrap { min-height: 100vh; padding: 12px; display: flex; flex-direction: column; align-items: center; }
+          #sheet { width: 8.5in; min-height: 11in; background: #fff; display: flex; flex-direction: column; align-items: center; }
+          #print-root { width: 8.5in; height: 5.5in; margin-top: 0.08in; }
+          .cut-line { width: 8.5in; border-top: 1px dashed #94a3b8; margin-top: 0.08in; }
+          .no-print { padding: 10px; text-align: center; font-family: system-ui, sans-serif; background: #f1f5f9; border-bottom: 1px solid #cbd5e1; width: 100%; box-sizing: border-box; border-radius: 8px; margin-bottom: 8px; max-width: 8.9in; }
           .no-print button { margin: 0 6px; padding: 8px 16px; cursor: pointer; font-size: 14px; border-radius: 6px; border: 1px solid #94a3b8; background: #fff; }
-          @media print { .no-print { display: none !important; } }
+          .no-print p { margin: 8px 0 0; font-size: 12px; color: #475569; }
+          @media print {
+            html, body { background: #fff !important; }
+            #wrap { padding: 0; }
+            #sheet { min-height: auto; }
+            .no-print { display: none !important; }
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
         </style>
       </head>
       <body>
-        <div class="no-print">
-          <button type="button" onclick="window.print()">Volver a imprimir</button>
-          <button type="button" onclick="window.close()">Cerrar</button>
+        <div id="wrap">
+          <div class="no-print">
+            <button type="button" onclick="window.print()">Imprimir (media hoja)</button>
+            <button type="button" onclick="window.close()">Cerrar</button>
+            <p>Plantilla real cargada desde <code>${PREIMPRESO_BG_URL}</code>. Papel Carta vertical, escala 100%.</p>
+          </div>
+          <div id="sheet">
+            <div id="print-root"></div>
+            <div class="cut-line"></div>
+          </div>
         </div>
-        <div id="print-root"></div>
       </body>
     </html>`;
   }

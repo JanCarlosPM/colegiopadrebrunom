@@ -688,19 +688,20 @@ function getShellHtml(layout: ReciboPrintLayout, title: string): string {
         <style>
           * { box-sizing: border-box; }
           html, body { margin: 0; padding: 0; background: #cbd5e1; }
-          @page { size: letter portrait; margin: 0.22in; }
+          @page { size: letter portrait; margin: 0; }
           #wrap { min-height: 100vh; padding: 12px; display: flex; flex-direction: column; align-items: center; }
-          #sheet { width: 8.5in; min-height: 11in; background: #fff; display: flex; flex-direction: column; align-items: center; }
-          #print-root { width: 8.5in; height: 5.5in; margin-top: 0.08in; }
-          .cut-line { width: 8.5in; border-top: 1px dashed #94a3b8; margin-top: 0.08in; }
+          #sheet { width: 8.5in; height: 11in; background: #fff; display: flex; flex-direction: column; align-items: center; }
+          #print-root { width: 8.5in; height: 5.5in; margin: 0; }
+          .cut-line { width: 8.5in; border-top: 1px dashed #94a3b8; margin: 0; }
           .no-print { padding: 10px; text-align: center; font-family: system-ui, sans-serif; background: #f1f5f9; border-bottom: 1px solid #cbd5e1; width: 100%; box-sizing: border-box; border-radius: 8px; margin-bottom: 8px; max-width: 8.9in; }
           .no-print button { margin: 0 6px; padding: 8px 16px; cursor: pointer; font-size: 14px; border-radius: 6px; border: 1px solid #94a3b8; background: #fff; }
           .no-print p { margin: 8px 0 0; font-size: 12px; color: #475569; }
           @media print {
             html, body { background: #fff !important; }
-            #wrap { padding: 0; }
-            #sheet { min-height: auto; }
+            #wrap { padding: 0; min-height: auto; }
+            #sheet { width: 8.5in; height: 11in; min-height: auto; }
             .no-print { display: none !important; }
+            .cut-line { border-top: 1px dashed transparent; }
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
@@ -711,7 +712,7 @@ function getShellHtml(layout: ReciboPrintLayout, title: string): string {
           <div class="no-print">
             <button type="button" onclick="window.print()">Imprimir (media hoja)</button>
             <button type="button" onclick="window.close()">Cerrar</button>
-            <p>Plantilla real cargada desde <code>${PREIMPRESO_BG_URL}</code>. Papel Carta vertical, escala 100%.</p>
+            <p>Plantilla real: media hoja exacta (8.5 x 5.5). En impresión usa escala 100% y sin márgenes.</p>
           </div>
           <div id="sheet">
             <div id="print-root"></div>

@@ -8,7 +8,7 @@ const INK_RED = "#c40000";
 const PREIMPRESO_BG_URL = "/recibocolegio.jpg";
 const PREIMPRESO_FONT_SIZE = 15;
 const PREIMPRESO_SHIFT_X = 0.0; // mueve todo el bloque horizontalmente (+ derecha / - izquierda)
-const PREIMPRESO_SHIFT_Y = -0.6; // ajuste fino vertical global (+ abajo / - arriba)
+const PREIMPRESO_SHIFT_Y = 0.0; // ajuste fino vertical global (+ abajo / - arriba)
 
 export type ReciboOficialData = {
   numero?: string;
@@ -17,7 +17,9 @@ export type ReciboOficialData = {
   grado?: string;
   anio: string;
   nivel?: string;
+  /** Solo si el pago fue en córdobas → se imprime en «RECIBO POR C$». */
   montoCordobas?: string;
+  /** Solo si el pago fue en dólares → se imprime en «U$». */
   montoDolares?: string;
   sumaDe?: string;
   concepto: string;
@@ -37,10 +39,16 @@ export type ImprimirReciboOptions = {
   /**
    * `oficial` — Réplica del recibo Asociación Escuela Padre Bruno (vertical, media hoja carta).
    * `carta` — Diseño vertical tipo comprobante moderno.
-   * `preimpreso` — Texto sobre `/recibo-colegio.png` si existe en public.
+   * `preimpreso` — Por defecto: **solo los datos** sobre hoja blanca (sin `recibocolegio.jpg`), mismas posiciones.
+   * Pon `preimpresoMostrarPlantilla: true` para ver el JPG detrás y alinear en pantalla.
    */
   layout?: ReciboPrintLayout;
   autoPrint?: boolean;
+  /**
+   * Solo con `layout: "preimpreso"`: si es `true`, muestra la imagen `recibocolegio.jpg` detrás del texto.
+   * Si es `false` u omite: **fondo blanco y solo la información** (número, grado, montos, etc.) — para superponer con el recibo físico o imprimir en blanco.
+   */
+  preimpresoMostrarPlantilla?: boolean;
 };
 
 const DEFAULT_INSTITUCION = "ASOCIACIÓN ESCUELA PADRE BRUNO MARTÍNEZ";
@@ -426,8 +434,14 @@ function ReciboOficialBrunoTemplate({
   );
 }
 
-/** Plantilla antigua: campos sobre PNG. */
+type ReciboPreimpresoTemplateProps = ReciboOficialData & {
+  /** Sin `recibocolegio.jpg`: fondo blanco, mismos campos y posiciones. */
+  soloTexto?: boolean;
+};
+
+/** Preimpreso: datos sobre JPG o solo sobre blanco (`soloTexto`). */
 function ReciboPreimpresoTemplate({
+  soloTexto = false,
   numero = "00001",
   fecha,
   estudiante,
@@ -438,20 +452,20 @@ function ReciboPreimpresoTemplate({
   montoDolares = "",
   sumaDe = "",
   concepto,
-}: ReciboOficialData) {
+}: ReciboPreimpresoTemplateProps) {
   const posBase = {
     numero: { top: "9.5%", left: "86.2%" },
-    // Ajuste fino con base en vista previa real del navegador:
-    // se desplazaron ~6-7% hacia arriba para alinear con los renglones impresos.
-    grado: { top: "41.8%", left: "8.5%" },
-    anio: { top: "41.8%", left: "38.5%" },
-    nivel: { top: "41.8%", left: "62.5%" },
-    fecha: { top: "48.9%", left: "8.5%" },
-    cordobas: { top: "48.9%", left: "75.5%" },
-    dolares: { top: "55.8%", left: "75.5%" },
-    recibimosDe: { top: "55.8%", left: "18%" },
-    sumaDe: { top: "62.7%", left: "14.5%" },
-    concepto: { top: "69.6%", left: "18.8%" },
+    // 5ª ronda (recuadros rojos): fila 1 GRADO/AÑO/NIVEL; 2 FECHA + C$; 3 U$; 4 RECIBIMOS (no tocar);
+    // 5 LA SUMA DE; 6 EN CONCEPTO. C$ / U$ según moneda (ver tipo ReciboOficialData).
+    grado: { top: "40.0%", left: "17%" },
+    anio: { top: "40.0%", left: "36.2%" },
+    nivel: { top: "40.0%", left: "69%" },
+    fecha: { top: "46.2%", left: "11.8%" },
+    cordobas: { top: "46.2%", left: "72%" },
+    dolares: { top: "50.6%", left: "75.5%" },
+    recibimosDe: { top: "55.0%", left: "36%" },
+    sumaDe: { top: "59.4%", left: "36%" },
+    concepto: { top: "62.0%", left: "41%" },
   } as const;
 
   const withShift = (v: { top: string; left: string }) => ({
@@ -467,7 +481,8 @@ function ReciboPreimpresoTemplate({
     fecha: withShift(posBase.fecha),
     cordobas: withShift(posBase.cordobas),
     dolares: withShift(posBase.dolares),
-    recibimosDe: withShift(posBase.recibimosDe),
+    // RECIBIMOS DE: posición final acordada — sin withShift para que SHIFT_X/Y no la mueva.
+    recibimosDe: { top: posBase.recibimosDe.top, left: posBase.recibimosDe.left },
     sumaDe: withShift(posBase.sumaDe),
     concepto: withShift(posBase.concepto),
   } as const;
@@ -478,10 +493,11 @@ function ReciboPreimpresoTemplate({
         position: "relative",
         width: "100%",
         height: "100%",
-        backgroundImage: `url('${PREIMPRESO_BG_URL}')`,
-        backgroundSize: "100% 100%",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
+        backgroundColor: soloTexto ? "#ffffff" : "transparent",
+        backgroundImage: soloTexto ? "none" : `url('${PREIMPRESO_BG_URL}')`,
+        backgroundSize: soloTexto ? undefined : "100% 100%",
+        backgroundPosition: soloTexto ? undefined : "center",
+        backgroundRepeat: soloTexto ? undefined : "no-repeat",
         fontFamily: "Arial, sans-serif",
         color: "#0f3f78",
       }}
@@ -499,7 +515,19 @@ function ReciboPreimpresoTemplate({
       >
         {numero}
       </div>
-      <div style={{ position: "absolute", top: pos.grado.top, left: pos.grado.left, width: "24%", fontSize: PREIMPRESO_FONT_SIZE }}>{grado}</div>
+      <div
+        style={{
+          position: "absolute",
+          top: pos.grado.top,
+          left: pos.grado.left,
+          width: "24%",
+          fontSize: PREIMPRESO_FONT_SIZE,
+          lineHeight: 1.05,
+          transform: "translate(2px, -9px)",
+        }}
+      >
+        {grado}
+      </div>
       <div
         style={{
           position: "absolute",
@@ -508,17 +536,107 @@ function ReciboPreimpresoTemplate({
           width: "18%",
           fontSize: PREIMPRESO_FONT_SIZE,
           textAlign: "center",
+          lineHeight: 1.05,
+          transform: "translate(12px, -9px)",
         }}
       >
         {anio}
       </div>
-      <div style={{ position: "absolute", top: pos.nivel.top, left: pos.nivel.left, width: "30%", fontSize: PREIMPRESO_FONT_SIZE }}>{nivel}</div>
-      <div style={{ position: "absolute", top: pos.fecha.top, left: pos.fecha.left, width: "42%", fontSize: PREIMPRESO_FONT_SIZE }}>{fecha}</div>
-      <div style={{ position: "absolute", top: pos.cordobas.top, left: pos.cordobas.left, width: "18%", fontSize: PREIMPRESO_FONT_SIZE }}>{montoCordobas}</div>
-      <div style={{ position: "absolute", top: pos.dolares.top, left: pos.dolares.left, width: "18%", fontSize: PREIMPRESO_FONT_SIZE }}>{montoDolares}</div>
-      <div style={{ position: "absolute", top: pos.recibimosDe.top, left: pos.recibimosDe.left, width: "73%", fontSize: PREIMPRESO_FONT_SIZE }}>{estudiante}</div>
-      <div style={{ position: "absolute", top: pos.sumaDe.top, left: pos.sumaDe.left, width: "76%", fontSize: PREIMPRESO_FONT_SIZE }}>{sumaDe}</div>
-      <div style={{ position: "absolute", top: pos.concepto.top, left: pos.concepto.left, width: "70%", fontSize: PREIMPRESO_FONT_SIZE }}>{concepto}</div>
+      <div
+        style={{
+          position: "absolute",
+          top: pos.nivel.top,
+          left: pos.nivel.left,
+          width: "30%",
+          fontSize: PREIMPRESO_FONT_SIZE,
+          textAlign: "center",
+          lineHeight: 1.05,
+          transform: "translate(-8px, -7px)",
+        }}
+      >
+        {nivel}
+      </div>
+      <div
+        style={{
+          position: "absolute",
+          top: pos.fecha.top,
+          left: pos.fecha.left,
+          width: "42%",
+          fontSize: PREIMPRESO_FONT_SIZE,
+          textAlign: "center",
+          lineHeight: 1.05,
+          transform: "translate(-4px, -4px)",
+        }}
+      >
+        {fecha}
+      </div>
+      <div
+        style={{
+          position: "absolute",
+          top: pos.cordobas.top,
+          left: pos.cordobas.left,
+          width: "18%",
+          fontSize: PREIMPRESO_FONT_SIZE,
+          textAlign: "center",
+          lineHeight: 1.05,
+          transform: "translate(-3px, -4px)",
+        }}
+      >
+        {montoCordobas}
+      </div>
+      <div
+        style={{
+          position: "absolute",
+          top: pos.dolares.top,
+          left: pos.dolares.left,
+          width: "18%",
+          fontSize: PREIMPRESO_FONT_SIZE,
+          textAlign: "center",
+          lineHeight: 1.05,
+          /* Misma base horizontal que RECIBO POR C$; ~5px más abajo en la línea U$ */
+          transform: "translate(-3px, 1px)",
+        }}
+      >
+        {montoDolares}
+      </div>
+      <div
+        style={{
+          position: "absolute",
+          top: pos.recibimosDe.top,
+          left: pos.recibimosDe.left,
+          width: "73%",
+          fontSize: PREIMPRESO_FONT_SIZE,
+          transform: "translateY(2px)",
+        }}
+      >
+        {estudiante}
+      </div>
+      <div
+        style={{
+          position: "absolute",
+          top: pos.sumaDe.top,
+          left: pos.sumaDe.left,
+          width: "76%",
+          fontSize: PREIMPRESO_FONT_SIZE,
+          lineHeight: 1.05,
+          transform: "translate(3px, 9px)",
+        }}
+      >
+        {sumaDe}
+      </div>
+      <div
+        style={{
+          position: "absolute",
+          top: pos.concepto.top,
+          left: pos.concepto.left,
+          width: "70%",
+          fontSize: PREIMPRESO_FONT_SIZE,
+          lineHeight: 1.05,
+          transform: "translateY(24px)",
+        }}
+      >
+        {concepto}
+      </div>
     </div>
   );
 }
@@ -697,11 +815,19 @@ function ReciboCartaTemplate({
   );
 }
 
-function getShellHtml(layout: ReciboPrintLayout, title: string): string {
+function getShellHtml(
+  layout: ReciboPrintLayout,
+  title: string,
+  meta?: { preimpresoSinPlantilla?: boolean },
+): string {
   const fonts =
     '<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@700;900&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,700&display=swap" rel="stylesheet"/>';
 
   if (layout === "preimpreso") {
+    const sinPlantilla = Boolean(meta?.preimpresoSinPlantilla);
+    const ayudaPreimpreso = sinPlantilla
+      ? "<strong>Solo datos:</strong> fondo blanco, sin imagen del recibo; el texto sigue en las mismas posiciones. Superpón la hoja con tu recibo físico o imprime en blanco. Carta vertical, 100%, sin márgenes."
+      : "<strong>Con plantilla:</strong> ves el JPG del recibo detrás del texto (para alinear en pantalla). Media hoja 8.5×5.5; impresión 100%, sin márgenes.";
     return `
     <html lang="es">
       <head>
@@ -735,7 +861,7 @@ function getShellHtml(layout: ReciboPrintLayout, title: string): string {
           <div class="no-print">
             <button type="button" onclick="window.print()">Imprimir (media hoja)</button>
             <button type="button" onclick="window.close()">Cerrar</button>
-            <p>Plantilla real: media hoja exacta (8.5 x 5.5). En impresión usa escala 100% y sin márgenes.</p>
+            <p>${ayudaPreimpreso}</p>
           </div>
           <div id="sheet">
             <div id="print-root"></div>
@@ -835,6 +961,9 @@ function getShellHtml(layout: ReciboPrintLayout, title: string): string {
 export function imprimirReciboOficial(data: ReciboOficialData, options?: ImprimirReciboOptions) {
   const layout = options?.layout ?? "preimpreso";
   const autoPrint = options?.autoPrint !== false;
+  /** Por defecto: sin JPG (blanco + datos). `preimpresoMostrarPlantilla: true` → imagen de fondo. */
+  const preimpresoSinPlantilla =
+    layout === "preimpreso" && options?.preimpresoMostrarPlantilla !== true;
 
   const w = layout === "oficial" ? 840 : 900;
   const h = layout === "oficial" ? 1240 : 1100;
@@ -849,7 +978,11 @@ export function imprimirReciboOficial(data: ReciboOficialData, options?: Imprimi
     carta: "Recibo — Carta",
     preimpreso: "Recibo — Preimpreso",
   };
-  win.document.write(getShellHtml(layout, titles[layout]));
+  const docTitle =
+    layout === "preimpreso" && preimpresoSinPlantilla
+      ? "Recibo — Solo datos (blanco)"
+      : titles[layout];
+  win.document.write(getShellHtml(layout, docTitle, { preimpresoSinPlantilla }));
   win.document.close();
 
   const rootElement = win.document.getElementById("print-root");
@@ -857,7 +990,7 @@ export function imprimirReciboOficial(data: ReciboOficialData, options?: Imprimi
 
   const root = createRoot(rootElement);
   if (layout === "preimpreso") {
-    root.render(<ReciboPreimpresoTemplate {...data} />);
+    root.render(<ReciboPreimpresoTemplate {...data} soloTexto={preimpresoSinPlantilla} />);
   } else if (layout === "carta") {
     root.render(<ReciboCartaTemplate {...data} />);
   } else {

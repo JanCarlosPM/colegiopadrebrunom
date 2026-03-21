@@ -26,7 +26,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus } from "lucide-react";
+import { Plus, Printer } from "lucide-react";
+import { imprimirReciboOficial } from "@/utils/imprimirReciboMatricula";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invalidateFinancialViews } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
@@ -74,7 +75,12 @@ type OtherPaymentRow = {
   currency: "NIO" | "USD";
   status: "COMPLETADO" | "PARCIAL";
   payment_date: string;
-  students?: { full_name?: string | null } | null;
+  notes?: string | null;
+  students?: {
+    full_name?: string | null;
+    grades?: { name?: string | null } | null;
+    sections?: { name?: string | null } | null;
+  } | null;
   payment_items?: { name?: string | null; category?: string | null } | null;
 };
 
@@ -260,23 +266,40 @@ export default function OtrosCobros() {
       if (!paymentForm.item_id) throw new Error("Selecciona concepto");
       if (amountToCharge <= 0) throw new Error("Monto inválido");
       if (!isReceivedValid) throw new Error("Recibido inválido");
+      if (!selectedStudent || !selectedItem) throw new Error("Datos incompletos");
 
-      const { error } = await supabase.from("other_payments").insert({
-        student_id: paymentForm.student_id,
-        item_id: paymentForm.item_id,
-        item_name: selectedItem?.name ?? "Cobro especial",
-        amount: Number(applied.toFixed(2)),
-        received_amount: Number(receivedNum.toFixed(2)),
-        change_amount: Number(change.toFixed(2)),
-        currency,
-        status,
-        payment_date: new Date().toISOString(),
-        academic_year: year,
-        notes: paymentForm.notes.trim() || null,
-      });
+      const paymentDate = new Date().toISOString();
+      const { data: inserted, error } = await supabase
+        .from("other_payments")
+        .insert({
+          student_id: paymentForm.student_id,
+          item_id: paymentForm.item_id,
+          item_name: selectedItem.name ?? "Cobro especial",
+          amount: Number(applied.toFixed(2)),
+          received_amount: Number(receivedNum.toFixed(2)),
+          change_amount: Number(change.toFixed(2)),
+          currency,
+          status,
+          payment_date: paymentDate,
+          academic_year: year,
+          notes: paymentForm.notes.trim() || null,
+        })
+        .select("id")
+        .single();
       if (error) throw error;
+
+      return {
+        id: inserted.id as string,
+        paymentDate,
+        student: selectedStudent,
+        itemName: selectedItem.name ?? "Cobro especial",
+        applied,
+        receivedAmount: Number(receivedNum.toFixed(2)),
+        currency,
+        notes: paymentForm.notes.trim(),
+      };
     },
-    onSuccess: async () => {
+    onSuccess: async (ctx) => {
       await qc.invalidateQueries({ queryKey: ["other-payments", year] });
       await invalidateFinancialViews(qc, { year });
       toast.success("Pago registrado correctamente");
@@ -290,6 +313,30 @@ export default function OtrosCobros() {
         notes: "",
       });
       setStudentSearch("");
+
+      const simbolo = ctx.currency === "USD" ? "$" : "C$";
+      const conceptoBase = ctx.itemName;
+      const concepto =
+        ctx.notes && ctx.notes.length > 0 ? `${conceptoBase} — ${ctx.notes}` : conceptoBase;
+
+      setTimeout(() => {
+        imprimirReciboOficial({
+          numero: String(ctx.id).slice(-5),
+          fecha: new Date(ctx.paymentDate).toLocaleString("es-NI", {
+            timeZone: "America/Managua",
+          }),
+          estudiante: ctx.student.full_name,
+          grado: ctx.student.grades?.name ?? "",
+          anio: String(year),
+          nivel: ctx.student.sections?.name ?? "",
+          montoCordobas:
+            ctx.currency === "NIO" ? ctx.receivedAmount.toFixed(2) : "",
+          montoDolares:
+            ctx.currency === "USD" ? ctx.receivedAmount.toFixed(2) : "",
+          sumaDe: `${simbolo} ${Number(ctx.applied).toFixed(2)}`,
+          concepto,
+        });
+      }, 300);
     },
     onError: (e: unknown) =>
       isMissingTableError(e)
@@ -631,12 +678,13 @@ export default function OtrosCobros() {
             <TableHead>Cambio</TableHead>
             <TableHead>Estado</TableHead>
             <TableHead>Fecha</TableHead>
+            <TableHead className="w-[52px] text-center">Recibo</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {!loadingPayments && filteredPayments.length === 0 && (
             <TableRow>
-              <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+              <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                 No hay cobros especiales registrados para este año.
               </TableCell>
             </TableRow>

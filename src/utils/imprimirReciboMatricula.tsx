@@ -438,15 +438,17 @@ function ReciboPreimpresoTemplate({
 }: ReciboOficialData) {
   const pos = {
     numero: { top: "9.5%", left: "86.2%" },
-    grado: { top: "49.5%", left: "8.5%" },
-    anio: { top: "49.5%", left: "38.5%" },
-    nivel: { top: "49.5%", left: "62.5%" },
-    fecha: { top: "57.5%", left: "8.5%" },
-    cordobas: { top: "57.5%", left: "75.5%" },
-    dolares: { top: "64.5%", left: "75.5%" },
-    recibimosDe: { top: "64.5%", left: "18%" },
-    sumaDe: { top: "72.5%", left: "14.5%" },
-    concepto: { top: "79.5%", left: "18.8%" },
+    // Ajuste fino con base en vista previa real del navegador:
+    // se desplazaron ~6-7% hacia arriba para alinear con los renglones impresos.
+    grado: { top: "43.0%", left: "8.5%" },
+    anio: { top: "43.0%", left: "38.5%" },
+    nivel: { top: "43.0%", left: "62.5%" },
+    fecha: { top: "50.8%", left: "8.5%" },
+    cordobas: { top: "50.8%", left: "75.5%" },
+    dolares: { top: "57.6%", left: "75.5%" },
+    recibimosDe: { top: "57.6%", left: "18%" },
+    sumaDe: { top: "64.7%", left: "14.5%" },
+    concepto: { top: "71.8%", left: "18.8%" },
   } as const;
 
   return (

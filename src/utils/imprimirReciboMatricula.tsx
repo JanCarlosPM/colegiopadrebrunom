@@ -806,10 +806,11 @@ function getShellHtml(layout: ReciboPrintLayout, title: string): string {
 }
 
 /**
- * Abre ventana de impresión. Por defecto: diseño <strong>oficial</strong> (vertical, media hoja).
+ * Abre ventana de impresión. Por defecto: diseño <strong>preimpreso</strong>
+ * (carta vertical completa con recibo horizontal en la mitad superior).
  */
 export function imprimirReciboOficial(data: ReciboOficialData, options?: ImprimirReciboOptions) {
-  const layout = options?.layout ?? "oficial";
+  const layout = options?.layout ?? "preimpreso";
   const autoPrint = options?.autoPrint !== false;
 
   const w = layout === "oficial" ? 840 : 900;

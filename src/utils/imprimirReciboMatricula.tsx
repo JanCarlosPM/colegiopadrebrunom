@@ -6,6 +6,9 @@ import { toast } from "sonner";
 const INK_BLUE = "#1a5490";
 const INK_RED = "#c40000";
 const PREIMPRESO_BG_URL = "/recibocolegio.jpg";
+const PREIMPRESO_FONT_SIZE = 15;
+const PREIMPRESO_SHIFT_X = 0.0; // mueve todo el bloque horizontalmente (+ derecha / - izquierda)
+const PREIMPRESO_SHIFT_Y = -0.6; // ajuste fino vertical global (+ abajo / - arriba)
 
 export type ReciboOficialData = {
   numero?: string;
@@ -436,7 +439,7 @@ function ReciboPreimpresoTemplate({
   sumaDe = "",
   concepto,
 }: ReciboOficialData) {
-  const pos = {
+  const posBase = {
     numero: { top: "9.5%", left: "86.2%" },
     // Ajuste fino con base en vista previa real del navegador:
     // se desplazaron ~6-7% hacia arriba para alinear con los renglones impresos.
@@ -449,6 +452,24 @@ function ReciboPreimpresoTemplate({
     recibimosDe: { top: "55.8%", left: "18%" },
     sumaDe: { top: "62.7%", left: "14.5%" },
     concepto: { top: "69.6%", left: "18.8%" },
+  } as const;
+
+  const withShift = (v: { top: string; left: string }) => ({
+    top: `${Number.parseFloat(v.top) + PREIMPRESO_SHIFT_Y}%`,
+    left: `${Number.parseFloat(v.left) + PREIMPRESO_SHIFT_X}%`,
+  });
+
+  const pos = {
+    numero: withShift(posBase.numero),
+    grado: withShift(posBase.grado),
+    anio: withShift(posBase.anio),
+    nivel: withShift(posBase.nivel),
+    fecha: withShift(posBase.fecha),
+    cordobas: withShift(posBase.cordobas),
+    dolares: withShift(posBase.dolares),
+    recibimosDe: withShift(posBase.recibimosDe),
+    sumaDe: withShift(posBase.sumaDe),
+    concepto: withShift(posBase.concepto),
   } as const;
 
   return (
@@ -478,26 +499,26 @@ function ReciboPreimpresoTemplate({
       >
         {numero}
       </div>
-      <div style={{ position: "absolute", top: pos.grado.top, left: pos.grado.left, width: "24%", fontSize: 15 }}>{grado}</div>
+      <div style={{ position: "absolute", top: pos.grado.top, left: pos.grado.left, width: "24%", fontSize: PREIMPRESO_FONT_SIZE }}>{grado}</div>
       <div
         style={{
           position: "absolute",
           top: pos.anio.top,
           left: pos.anio.left,
           width: "18%",
-          fontSize: 15,
+          fontSize: PREIMPRESO_FONT_SIZE,
           textAlign: "center",
         }}
       >
         {anio}
       </div>
-      <div style={{ position: "absolute", top: pos.nivel.top, left: pos.nivel.left, width: "30%", fontSize: 15 }}>{nivel}</div>
-      <div style={{ position: "absolute", top: pos.fecha.top, left: pos.fecha.left, width: "42%", fontSize: 15 }}>{fecha}</div>
-      <div style={{ position: "absolute", top: pos.cordobas.top, left: pos.cordobas.left, width: "18%", fontSize: 15 }}>{montoCordobas}</div>
-      <div style={{ position: "absolute", top: pos.dolares.top, left: pos.dolares.left, width: "18%", fontSize: 15 }}>{montoDolares}</div>
-      <div style={{ position: "absolute", top: pos.recibimosDe.top, left: pos.recibimosDe.left, width: "73%", fontSize: 15 }}>{estudiante}</div>
-      <div style={{ position: "absolute", top: pos.sumaDe.top, left: pos.sumaDe.left, width: "76%", fontSize: 15 }}>{sumaDe}</div>
-      <div style={{ position: "absolute", top: pos.concepto.top, left: pos.concepto.left, width: "70%", fontSize: 15 }}>{concepto}</div>
+      <div style={{ position: "absolute", top: pos.nivel.top, left: pos.nivel.left, width: "30%", fontSize: PREIMPRESO_FONT_SIZE }}>{nivel}</div>
+      <div style={{ position: "absolute", top: pos.fecha.top, left: pos.fecha.left, width: "42%", fontSize: PREIMPRESO_FONT_SIZE }}>{fecha}</div>
+      <div style={{ position: "absolute", top: pos.cordobas.top, left: pos.cordobas.left, width: "18%", fontSize: PREIMPRESO_FONT_SIZE }}>{montoCordobas}</div>
+      <div style={{ position: "absolute", top: pos.dolares.top, left: pos.dolares.left, width: "18%", fontSize: PREIMPRESO_FONT_SIZE }}>{montoDolares}</div>
+      <div style={{ position: "absolute", top: pos.recibimosDe.top, left: pos.recibimosDe.left, width: "73%", fontSize: PREIMPRESO_FONT_SIZE }}>{estudiante}</div>
+      <div style={{ position: "absolute", top: pos.sumaDe.top, left: pos.sumaDe.left, width: "76%", fontSize: PREIMPRESO_FONT_SIZE }}>{sumaDe}</div>
+      <div style={{ position: "absolute", top: pos.concepto.top, left: pos.concepto.left, width: "70%", fontSize: PREIMPRESO_FONT_SIZE }}>{concepto}</div>
     </div>
   );
 }

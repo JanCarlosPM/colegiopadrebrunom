@@ -112,22 +112,35 @@ const fetchItems = async (): Promise<PaymentItem[]> => {
   return (data ?? []) as PaymentItem[];
 };
 
-const fetchCurrentAppUser = async (): Promise<AppUser | null> => {
+type AuthAppContext = {
+  userId: string | null;
+  appUser: AppUser | null;
+};
+
+/** Sesión + fila en app_users (si existe y RLS lo permite). */
+const fetchAuthAppContext = async (): Promise<AuthAppContext> => {
   const { data: authData, error: authErr } = await supabase.auth.getUser();
   if (authErr) throw authErr;
-  const userId = authData.user?.id;
-  if (!userId) return null;
+  const userId = authData.user?.id ?? null;
+  if (!userId) return { userId: null, appUser: null };
 
   const { data, error } = await supabase
     .from("app_users")
     .select("id, role, is_active")
     .eq("id", userId)
     .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
+  // Si RLS impide leer app_users, igual dejamos userId: el botón no queda bloqueado sin motivo.
+  if (error) {
+    console.warn("[OtrosCobros] No se pudo leer app_users:", error.message);
+    return { userId, appUser: null };
+  }
+  if (!data) return { userId, appUser: null };
   return {
-    ...data,
-    role: data.role as AppUser["role"],
+    userId,
+    appUser: {
+      ...data,
+      role: data.role as AppUser["role"],
+    },
   };
 };
 
@@ -182,11 +195,13 @@ export default function OtrosCobros() {
 
   const { data: students = [] } = useQuery({ queryKey: ["students-active"], queryFn: fetchStudents });
   const { data: items = [], error: itemsError } = useQuery({ queryKey: ["payment-items"], queryFn: fetchItems, retry: false });
-  const { data: currentAppUser, isLoading: isLoadingAppUser } = useQuery({
+  const { data: authContext, isLoading: isLoadingAuthContext } = useQuery({
     queryKey: ["current-app-user"],
-    queryFn: fetchCurrentAppUser,
+    queryFn: fetchAuthAppContext,
     retry: false,
   });
+  const currentAppUser = authContext?.appUser ?? null;
+  const authUserId = authContext?.userId ?? null;
   const { data: payments = [], isLoading: loadingPayments, error: paymentsError } = useQuery({
     queryKey: ["other-payments", year],
     queryFn: () => fetchOtherPayments(year),
@@ -233,11 +248,11 @@ export default function OtrosCobros() {
   const change = Math.max(receivedNum - applied, 0);
   const status = applied + 0.0001 >= amountToCharge ? "COMPLETADO" : "PARCIAL";
   const canManageItems =
-    !!currentAppUser && currentAppUser.is_active && currentAppUser.role === "Administrador";
+    !!currentAppUser?.is_active && isAdminRole(currentAppUser.role);
 
   const createItem = useMutation({
     mutationFn: async () => {
-      if (!canManageItems) throw new Error("Solo un administrador puede crear conceptos.");
+      if (!authUserId) throw new Error("Inicia sesión para crear conceptos.");
       if (!itemForm.name.trim()) throw new Error("Nombre requerido");
       const amount = Number(itemForm.default_amount || 0);
       if (amount <= 0) throw new Error("Monto inválido");
@@ -257,14 +272,32 @@ export default function OtrosCobros() {
       setOpenItem(false);
       setItemForm({ name: "", category: "OTROS", default_amount: "", currency: "NIO" });
     },
-    onError: (e: unknown) =>
-      isMissingTableError(e)
-        ? toast.error("Falta aplicar la migración del módulo. Ejecuta 002_other_payments_module.sql en Supabase.")
-        : toast.error(
-            mapSupabaseErrorToToast(e, {
-              fallback: "No se pudo crear el concepto",
-            })
-          ),
+    onError: (e: unknown) => {
+      if (isMissingTableError(e)) {
+        toast.error(
+          "Falta aplicar la migración del módulo. Ejecuta 002_other_payments_module.sql en Supabase.",
+        );
+        return;
+      }
+      const msg = e instanceof Error ? e.message : String(e);
+      const low = msg.toLowerCase();
+      if (
+        low.includes("policy") ||
+        low.includes("permission denied") ||
+        low.includes("row-level security") ||
+        low.includes("rls")
+      ) {
+        toast.error(
+          "No tienes permiso para crear conceptos. En Configuración → Usuarios debe figurar tu cuenta como Administrador activo, y en Supabase el rol exacto «Administrador».",
+        );
+        return;
+      }
+      toast.error(
+        mapSupabaseErrorToToast(e, {
+          fallback: "No se pudo crear el concepto",
+        }),
+      );
+    },
   });
 
   const createOtherPayment = useMutation({
@@ -403,7 +436,14 @@ export default function OtrosCobros() {
           <DialogTrigger asChild>
             <Button
               variant="outline"
-              disabled={schemaNotReady || isLoadingAppUser || !canManageItems}
+              disabled={schemaNotReady || isLoadingAuthContext || !authUserId}
+              title={
+                !authUserId
+                  ? "Debes iniciar sesión"
+                  : canManageItems
+                    ? "Crear un concepto de cobro nuevo"
+                    : "Si no puedes guardar, pide en Configuración que tu usuario sea Administrador activo"
+              }
             >
               <Plus className="h-4 w-4 mr-2" />
               Nuevo Concepto

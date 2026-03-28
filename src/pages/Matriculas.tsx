@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Printer } from "lucide-react";
@@ -37,6 +37,7 @@ import { useEnrollmentFlow } from "@/hooks/useEnrollmentFlow";
 import { canApplyInputChange } from "@/lib/paymentValidation";
 import { mapSupabaseErrorToToast } from "@/lib/errorHandling";
 import { buildMissingMonthlyCharges } from "@/services/charges";
+import { receiptNumberForPrint, suggestNextReceiptNumber } from "@/lib/receiptNumber";
 
 type StudentRow = {
   id: string;
@@ -57,6 +58,7 @@ type EnrollmentRow = {
 
 type MatriculaPaymentRow = {
   id: string;
+  receipt_number?: string | null;
   amount: number;
   received_amount: number;
   change_amount: number;
@@ -117,6 +119,7 @@ const fetchData = async (year: number) => {
     .from("payments")
     .select(`
       id,
+      receipt_number,
       student_id,
       amount,
       received_amount,
@@ -202,6 +205,21 @@ export default function Matriculas() {
   const [tableSearch, setTableSearch] = useState("");
   const [total, setTotal] = useState(300);
   const [enrollmentHint, setEnrollmentHint] = useState("");
+  const [matriculaReceiptNumber, setMatriculaReceiptNumber] = useState("");
+
+  const prevMatriculaDialogOpen = useRef(false);
+  useEffect(() => {
+    const justOpened = openAdd && !prevMatriculaDialogOpen.current;
+    prevMatriculaDialogOpen.current = openAdd;
+    if (!justOpened) return;
+    let cancelled = false;
+    suggestNextReceiptNumber(year).then((n) => {
+      if (!cancelled) setMatriculaReceiptNumber(n);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [openAdd, year]);
 
   const enrollmentFlow = useEnrollmentFlow({
     currency,
@@ -244,6 +262,7 @@ export default function Matriculas() {
         String(p.change_amount).includes(searchValue) ||
         String(p.currency).toLowerCase().includes(searchValue) ||
         String(p.description ?? "").toLowerCase().includes(searchValue) ||
+        String(p.receipt_number ?? "").toLowerCase().includes(searchValue) ||
         fecha.includes(searchValue)
       );
     });
@@ -384,23 +403,32 @@ export default function Matriculas() {
         await ensureMonthlyCharges();
       }
 
-      const { error: paymentError } = await supabase.from("payments").insert({
-        student_id: selectedStudent.id,
-        concept: "MATRICULA",
-        amount: montoAplicado,
-        received_amount: enrollmentFlow.paid,
-        change_amount: cambioPago,
-        currency,
-        academic_year: year,
-        paid_at: now,
-        description: statusPago,
-        method: currency === "USD" ? "DOLAR" : "EFECTIVO",
-      });
+      const receiptTrim = matriculaReceiptNumber.trim();
+      const { data: payRow, error: paymentError } = await supabase
+        .from("payments")
+        .insert({
+          student_id: selectedStudent.id,
+          concept: "MATRICULA",
+          amount: montoAplicado,
+          received_amount: enrollmentFlow.paid,
+          change_amount: cambioPago,
+          currency,
+          academic_year: year,
+          paid_at: now,
+          description: statusPago,
+          method: currency === "USD" ? "DOLAR" : "EFECTIVO",
+          receipt_number: receiptTrim || null,
+        })
+        .select("id")
+        .single();
 
       if (paymentError) throw paymentError;
+      if (!payRow?.id) throw new Error("PAYMENT_INSERT_FAILED");
 
       return {
         paidAt: now,
+        paymentId: payRow.id as string,
+        receiptNumber: receiptTrim || null,
         montoAplicado,
         cambioPago,
         statusPago,
@@ -431,6 +459,7 @@ export default function Matriculas() {
         });
       }, 300);
 
+      setMatriculaReceiptNumber("");
       setRecibidoInput("");
       setSearch("");
       setSelectedStudent(null);
@@ -465,7 +494,13 @@ export default function Matriculas() {
   return (
     <DashboardLayout title="Matrículas" subtitle="Pago de matrícula">
       <div className="flex justify-end mb-6">
-        <Dialog open={openAdd} onOpenChange={setOpenAdd}>
+        <Dialog
+          open={openAdd}
+          onOpenChange={(v) => {
+            setOpenAdd(v);
+            if (!v) setMatriculaReceiptNumber("");
+          }}
+        >
           <DialogTrigger asChild>
             <Button className="h-11 text-base">
               <Plus className="mr-2 h-4 w-4" />
@@ -647,6 +682,18 @@ export default function Matriculas() {
               </div>
             )}
 
+            <div className="mt-4">
+              <label className="text-sm font-medium block mb-2">
+                N° recibo (opcional)
+              </label>
+              <Input
+                className="h-10 text-sm"
+                placeholder="Correlativo sugerido al abrir; puedes editarlo"
+                value={matriculaReceiptNumber}
+                onChange={(e) => setMatriculaReceiptNumber(e.target.value)}
+              />
+            </div>
+
             {/* RECIBIDO + CAMBIO */}
             <div className="space-y-3 mt-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -782,6 +829,7 @@ export default function Matriculas() {
             <TableHead>Moneda</TableHead>
             <TableHead>Estado</TableHead>
             <TableHead>Fecha y Hora</TableHead>
+            <TableHead>N° recibo</TableHead>
             <TableHead className="text-center">Acción</TableHead>
           </TableRow>
         </TableHeader>
@@ -789,7 +837,7 @@ export default function Matriculas() {
         <TableBody>
           {filteredPayments.length === 0 && (
             <TableRow>
-              <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+              <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
                 No hay pagos de matrícula para este filtro.
               </TableCell>
             </TableRow>
@@ -831,13 +879,17 @@ export default function Matriculas() {
                 })}
               </TableCell>
 
+              <TableCell className="text-muted-foreground text-sm">
+                {receiptNumberForPrint(p.receipt_number, p.id)}
+              </TableCell>
+
               <TableCell className="text-center">
                 <Button
                   variant="outline"
                   size="icon"
                   onClick={() =>
                     imprimirReciboMatricula({
-                      numero: String(p.id).slice(-5),
+                      numero: receiptNumberForPrint(p.receipt_number, p.id),
                       fecha: new Date(p.paid_at).toLocaleDateString("es-NI", {
                         timeZone: "America/Managua",
                       }),

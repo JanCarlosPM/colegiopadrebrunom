@@ -21,6 +21,7 @@ import {
   normalizeCurrency,
 } from "@/lib/billing";
 import { toast } from "sonner";
+import { receiptNumberForPrint } from "@/lib/receiptNumber";
 
 const REPORT_CATEGORIES = {
   resumen: "Resumen",
@@ -53,6 +54,7 @@ const REPORT_TYPES: { value: string; label: string; category: keyof typeof REPOR
 type StudentReportRow = {
   id: string;
   full_name: string;
+  student_code?: string | null;
   status?: string | null;
   guardians?: { full_name?: string | null; phone?: string | null } | null;
   grades?: { name?: string | null } | null;
@@ -87,6 +89,7 @@ type ChargeReportRow = {
 type PaymentReportRow = {
   id: string;
   student_id: string;
+  receipt_number?: string | null;
   charge_id?: string | null;
   concept?: string | null;
   academic_year?: number | null;
@@ -135,6 +138,7 @@ const fetchReportData = async (): Promise<{
     supabase.from("students").select(`
       id,
       full_name,
+      student_code,
       status,
       guardians ( full_name, phone ),
       grades ( name ),
@@ -166,6 +170,7 @@ const fetchReportData = async (): Promise<{
     supabase.from("payments").select(`
       id,
       student_id,
+      receipt_number,
       charge_id,
       concept,
       academic_year,
@@ -842,7 +847,16 @@ export default function Reportes() {
   );
 
   const showDateRange = tipoReporte === "caja" || tipoReporte === "devoluciones";
-  const showMes = !["resumen-ejecutivo", "estudiantes-por-grado", "matriculas-por-estado", "ingresos-por-mes", "estudiantes", "pendientes", "arqueo-dia"].includes(tipoReporte);
+  const showMes = ![
+    "resumen-ejecutivo",
+    "estudiantes-por-grado",
+    "matriculas-por-estado",
+    "ingresos-por-mes",
+    "estudiantes",
+    "pendientes",
+    "arqueo-dia",
+    "planilla-mensualidades",
+  ].includes(tipoReporte);
 
   return (
     <DashboardLayout title="Reportes" subtitle="Generar reportes de estudiantes, matrículas, ingresos y morosidad">

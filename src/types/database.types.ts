@@ -245,6 +245,7 @@ export type Database = {
           payment_date: string;
           academic_year: number;
           notes: string | null;
+          receipt_number: string | null;
           created_at: string;
         };
         Insert: {
@@ -260,6 +261,7 @@ export type Database = {
           payment_date?: string;
           academic_year: number;
           notes?: string | null;
+          receipt_number?: string | null;
           created_at?: string;
         };
         Update: {
@@ -275,6 +277,7 @@ export type Database = {
           payment_date?: string;
           academic_year?: number;
           notes?: string | null;
+          receipt_number?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -326,6 +329,8 @@ export type Database = {
           currency: string | null;
           method: string | null;
           paid_at: string | null;
+          /** N° recibo del talonario (#RECIBO en planilla). */
+          receipt_number: string | null;
           status: string | null;
           description: string | null;
           created_at?: string | null;
@@ -343,6 +348,7 @@ export type Database = {
           currency?: string | null;
           method?: string | null;
           paid_at?: string | null;
+          receipt_number?: string | null;
           status?: string | null;
           description?: string | null;
           created_at?: string | null;
@@ -360,6 +366,7 @@ export type Database = {
           currency?: string | null;
           method?: string | null;
           paid_at?: string | null;
+          receipt_number?: string | null;
           status?: string | null;
           description?: string | null;
           created_at?: string | null;
@@ -457,6 +464,8 @@ export type Database = {
         Row: {
           id: string;
           full_name: string | null;
+          /** Código en planilla / expediente (N° estudiante del Excel). */
+          student_code: string | null;
           guardian_id: string | null;
           grade_id: string | null;
           section_id: string | null;
@@ -466,6 +475,7 @@ export type Database = {
         Insert: {
           id?: string;
           full_name?: string | null;
+          student_code?: string | null;
           guardian_id?: string | null;
           grade_id?: string | null;
           section_id?: string | null;
@@ -475,6 +485,7 @@ export type Database = {
         Update: {
           id?: string;
           full_name?: string | null;
+          student_code?: string | null;
           guardian_id?: string | null;
           grade_id?: string | null;
           section_id?: string | null;

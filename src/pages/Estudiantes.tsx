@@ -150,6 +150,8 @@ export default function Estudiantes() {
 
   const [search, setSearch] = useState("");
   const [yearFilter, setYearFilter] = useState("todos");
+  /** todos | ACTIVO | INACTIVO */
+  const [statusFilter, setStatusFilter] = useState<"todos" | "ACTIVO" | "INACTIVO">("ACTIVO");
   const [openAdd, setOpenAdd] = useState(false);
   const [openEdit, setOpenEdit] = useState(false);
   const [togglingStudentId, setTogglingStudentId] = useState<string | null>(null);
@@ -321,7 +323,9 @@ export default function Estudiantes() {
     .map((s) => ({
       id: s.id,
       nombre: s.full_name,
-      estado: s.status ?? "ACTIVO",
+      estado: String(s.status ?? "ACTIVO")
+        .trim()
+        .toUpperCase() as "ACTIVO" | "INACTIVO",
       grado: s.grades?.name ?? "-",
       grade_id: s.grades?.id ?? "",
       seccion: s.sections?.name ?? "-",
@@ -348,7 +352,10 @@ export default function Estudiantes() {
       const matchesYear =
         yearFilter === "todos" || s.years.includes(yearFilter);
 
-      return matchesSearch && matchesYear;
+      const matchesStatus =
+        statusFilter === "todos" || s.estado === statusFilter;
+
+      return matchesSearch && matchesYear && matchesStatus;
     });
 
   /* =========================
@@ -373,27 +380,44 @@ export default function Estudiantes() {
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" />
           <Input
-            placeholder="Buscar por estudiante, tutor, teléfono, grado o estado"
+            placeholder="Buscar por nombre, tutor, teléfono, grado o estado"
             className="pl-9"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
 
-        <div className="w-full md:w-48">
-          <Select value={yearFilter} onValueChange={setYearFilter}>
-            <SelectTrigger>
-              <SelectValue placeholder="Filtrar por año" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todos los años</SelectItem>
-              {allYears.map((year) => (
-                <SelectItem key={year} value={year}>
-                  {year}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto md:shrink-0">
+          <div className="w-full sm:w-44 md:w-48">
+            <Select value={yearFilter} onValueChange={setYearFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="Año académico" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos los años</SelectItem>
+                {allYears.map((year) => (
+                  <SelectItem key={year} value={year}>
+                    {year}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="w-full sm:w-44 md:w-48">
+            <Select
+              value={statusFilter}
+              onValueChange={(v) => setStatusFilter(v as "todos" | "ACTIVO" | "INACTIVO")}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Estado" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos los estados</SelectItem>
+                <SelectItem value="ACTIVO">Solo activos</SelectItem>
+                <SelectItem value="INACTIVO">Solo inactivos</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <Dialog
@@ -577,6 +601,7 @@ export default function Estudiantes() {
       <Table>
         <TableHeader>
           <TableRow className="bg-muted/50">
+            <TableHead className="w-12 text-center">N°</TableHead>
             <TableHead>Nombre</TableHead>
             <TableHead>Grado</TableHead>
             <TableHead>Sección</TableHead>
@@ -589,8 +614,11 @@ export default function Estudiantes() {
         </TableHeader>
 
         <TableBody>
-          {students.map((s) => (
+          {students.map((s, index) => (
             <TableRow key={s.id}>
+              <TableCell className="text-center text-muted-foreground tabular-nums">
+                {index + 1}
+              </TableCell>
               <TableCell>{s.nombre}</TableCell>
               <TableCell>{s.grado}</TableCell>
               <TableCell>{s.seccion}</TableCell>

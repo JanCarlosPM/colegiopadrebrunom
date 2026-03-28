@@ -4,13 +4,13 @@ import { toast } from "sonner";
 
 /** Azul institucional cercano al recibo impreso original */
 const INK_BLUE = "#1a5490";
-const INK_RED = "#c40000";
 const PREIMPRESO_BG_URL = "/recibocolegio.jpg";
 const PREIMPRESO_FONT_SIZE = 15;
 const PREIMPRESO_SHIFT_X = 0.0; // mueve todo el bloque horizontalmente (+ derecha / - izquierda)
 const PREIMPRESO_SHIFT_Y = 0.0; // ajuste fino vertical global (+ abajo / - arriba)
 
 export type ReciboOficialData = {
+  /** Conservado por compatibilidad; ya no se muestra en la impresión. */
   numero?: string;
   fecha: string;
   estudiante: string;
@@ -46,7 +46,7 @@ export type ImprimirReciboOptions = {
   autoPrint?: boolean;
   /**
    * Solo con `layout: "preimpreso"`: si es `true`, muestra la imagen `recibocolegio.jpg` detrás del texto.
-   * Si es `false` u omite: **fondo blanco y solo la información** (número, grado, montos, etc.) — para superponer con el recibo físico o imprimir en blanco.
+   * Si es `false` u omite: **fondo blanco y solo la información** (grado, montos, etc.) — para superponer con el recibo físico o imprimir en blanco.
    */
   preimpresoMostrarPlantilla?: boolean;
 };
@@ -204,7 +204,6 @@ function LineaCampo({
  * Réplica del recibo físico (vertical, media hoja carta, doble marco, tipografías y campos).
  */
 function ReciboOficialBrunoTemplate({
-  numero = "00000",
   fecha,
   estudiante,
   grado = "",
@@ -241,7 +240,7 @@ function ReciboOficialBrunoTemplate({
       <header
         style={{
           display: "grid",
-          gridTemplateColumns: "0.78in 1fr minmax(0.9in, auto)",
+          gridTemplateColumns: "0.78in 1fr",
           alignItems: "start",
           gap: "0.12in",
           marginBottom: "0.06in",
@@ -304,18 +303,6 @@ function ReciboOficialBrunoTemplate({
           >
             RECIBO
           </div>
-        </div>
-        <div style={{ textAlign: "right", paddingTop: "4px" }}>
-          <span
-            style={{
-              fontFamily: "'Merriweather', Georgia, serif",
-              fontWeight: 700,
-              fontSize: "15pt",
-              color: INK_RED,
-            }}
-          >
-            Nº {numero}
-          </span>
         </div>
       </header>
 
@@ -442,7 +429,6 @@ type ReciboPreimpresoTemplateProps = ReciboOficialData & {
 /** Preimpreso: datos sobre JPG o solo sobre blanco (`soloTexto`). */
 function ReciboPreimpresoTemplate({
   soloTexto = false,
-  numero = "00001",
   fecha,
   estudiante,
   grado = "",
@@ -454,7 +440,6 @@ function ReciboPreimpresoTemplate({
   concepto,
 }: ReciboPreimpresoTemplateProps) {
   const posBase = {
-    numero: { top: "9.5%", left: "86.2%" },
     // 5ª ronda (recuadros rojos): fila 1 GRADO/AÑO/NIVEL; 2 FECHA + C$; 3 U$; 4 RECIBIMOS (no tocar);
     // 5 LA SUMA DE; 6 EN CONCEPTO. C$ / U$ según moneda (ver tipo ReciboOficialData).
     grado: { top: "40.0%", left: "17%" },
@@ -474,7 +459,6 @@ function ReciboPreimpresoTemplate({
   });
 
   const pos = {
-    numero: withShift(posBase.numero),
     grado: withShift(posBase.grado),
     anio: withShift(posBase.anio),
     nivel: withShift(posBase.nivel),
@@ -502,19 +486,6 @@ function ReciboPreimpresoTemplate({
         color: "#0f3f78",
       }}
     >
-      <div
-        style={{
-          position: "absolute",
-          top: pos.numero.top,
-          left: pos.numero.left,
-          fontSize: 22,
-          fontWeight: "bold",
-          color: "#c44",
-          letterSpacing: "1px",
-        }}
-      >
-        {numero}
-      </div>
       <div
         style={{
           position: "absolute",
@@ -642,7 +613,6 @@ function ReciboPreimpresoTemplate({
 }
 
 function ReciboCartaTemplate({
-  numero = "—",
   fecha,
   estudiante,
   grado = "—",
@@ -655,7 +625,6 @@ function ReciboCartaTemplate({
   institucion = INSTITUCION_CARTA,
 }: ReciboOficialData) {
   const brand = "#0f3f78";
-  const accent = "#c2410c";
 
   const rowStyle: CSSProperties = {
     display: "grid",
@@ -712,17 +681,13 @@ function ReciboCartaTemplate({
       <div
         style={{
           display: "flex",
-          justifyContent: "space-between",
+          justifyContent: "flex-end",
           alignItems: "flex-start",
           marginBottom: "0.3in",
           flexWrap: "wrap",
           gap: "12px",
         }}
       >
-        <div>
-          <span style={labelStyle}>No. recibo</span>
-          <div style={{ fontSize: "18pt", fontWeight: 800, color: accent }}>{numero}</div>
-        </div>
         <div style={{ textAlign: "right" }}>
           <span style={labelStyle}>Fecha y hora</span>
           <div style={{ fontSize: "13pt", fontWeight: 600 }}>{fecha}</div>

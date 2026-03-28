@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +36,7 @@ import { imprimirReciboOficial } from "@/utils/imprimirReciboMatricula";
 import { usePaymentsFlow } from "@/hooks/usePaymentsFlow";
 import { canApplyInputChange } from "@/lib/paymentValidation";
 import { mapSupabaseErrorToToast } from "@/lib/errorHandling";
+import { receiptNumberForPrint, suggestNextReceiptNumber } from "@/lib/receiptNumber";
 
 type StudentRow = {
   id: string;
@@ -57,6 +58,7 @@ type MonthlyChargeRow = {
 
 type MonthlyPaymentRow = {
   id: string;
+  receipt_number?: string | null;
   currency: "NIO" | "USD";
   amount: number;
   received_amount: number;
@@ -77,6 +79,7 @@ type PaymentFormState = {
   charge_id: string;
   recibido: string;
   pay_currency: "NIO" | "USD";
+  receipt_number: string;
 };
 
 /* ================= FETCHERS ================= */
@@ -98,6 +101,7 @@ const fetchPayments = async (year: number): Promise<MonthlyPaymentRow[]> => {
     .from("payments")
     .select(`
       id,
+      receipt_number,
       student_id,
       charge_id,
       amount,
@@ -242,6 +246,20 @@ export default function Pagos() {
     }
   }, [defaultAcademicYear]);
 
+  const prevDialogOpen = useRef(false);
+  useEffect(() => {
+    const justOpened = open && !prevDialogOpen.current;
+    prevDialogOpen.current = open;
+    if (!justOpened) return;
+    let cancelled = false;
+    suggestNextReceiptNumber(year).then((n) => {
+      if (!cancelled) setForm((p) => ({ ...p, receipt_number: n }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, year]);
+
   useEffect(() => {
     if (!form.student_id || form.charge_id || studentCharges.length === 0) return;
     const firstCharge = studentCharges[0];
@@ -259,6 +277,7 @@ export default function Pagos() {
       charge_id: "",
       recibido: "",
       pay_currency: "USD",
+      receipt_number: "",
     });
     setSearch("");
     setStudentCharges([]);
@@ -400,23 +419,30 @@ export default function Pagos() {
           ? recibidoNum - freshAmountAppliedInPayCurrency
           : 0;
 
-      const { error: payErr } = await supabase.from("payments").insert({
-        student_id: freshCharge.student_id,
-        charge_id: freshCharge.id,
-        concept: "MENSUALIDAD",
-        academic_year: year,
-        month: freshCharge.month,
-        amount: Number(freshAmountAppliedInPayCurrency.toFixed(2)),
-        received_amount: Number(recibidoNum.toFixed(2)),
-        change_amount: Number(freshCambio.toFixed(2)),
-        currency: payCurrency,
-        method: payCurrency === "USD" ? "DOLAR" : "EFECTIVO",
-        paid_at: paidAt,
-        status: "COMPLETADO",
-        description: newStatus,
-      });
+      const receiptTrim = form.receipt_number.trim();
+      const { data: insertedPay, error: payErr } = await supabase
+        .from("payments")
+        .insert({
+          student_id: freshCharge.student_id,
+          charge_id: freshCharge.id,
+          concept: "MENSUALIDAD",
+          academic_year: year,
+          month: freshCharge.month,
+          amount: Number(freshAmountAppliedInPayCurrency.toFixed(2)),
+          received_amount: Number(recibidoNum.toFixed(2)),
+          change_amount: Number(freshCambio.toFixed(2)),
+          currency: payCurrency,
+          method: payCurrency === "USD" ? "DOLAR" : "EFECTIVO",
+          paid_at: paidAt,
+          status: "COMPLETADO",
+          description: newStatus,
+          receipt_number: receiptTrim || null,
+        })
+        .select("id")
+        .single();
 
       if (payErr) throw payErr;
+      if (!insertedPay?.id) throw new Error("PAYMENT_INSERT_FAILED");
 
       const { error: chargeErr } = await supabase
         .from("charges")
@@ -430,6 +456,8 @@ export default function Pagos() {
 
       return {
         paidAt,
+        paymentId: insertedPay.id as string,
+        receiptNumber: receiptTrim || null,
         chargeMonth: freshCharge.month,
         totalInPayCurrency: Number(freshRemainingInPayCurrency.toFixed(2)),
         appliedInPayCurrency: Number(freshAmountAppliedInPayCurrency.toFixed(2)),
@@ -437,7 +465,13 @@ export default function Pagos() {
       };
     },
 
-    onSuccess: async ({ paidAt, chargeMonth, appliedInPayCurrency }) => {
+    onSuccess: async ({
+      paidAt,
+      chargeMonth,
+      appliedInPayCurrency,
+      paymentId,
+      receiptNumber,
+    }) => {
       await invalidateFinancialViews(qc, { year });
 
       if (selectedCharge?.student_id) {
@@ -447,7 +481,7 @@ export default function Pagos() {
       setOpen(false);
 
       imprimirReciboOficial({
-        numero: String(Date.now()).slice(-5),
+        numero: receiptNumberForPrint(receiptNumber, paymentId),
         estudiante: search,
         grado: selectedStudent?.grades?.name ?? "",
         anio: String(year),
@@ -487,7 +521,7 @@ export default function Pagos() {
   });
 
   const filtered = payments.filter((p) => {
-    const text = `${p.students?.full_name ?? ""} ${p.students?.grades?.name ?? ""} ${p.students?.sections?.name ?? ""} ${p.description ?? ""} ${p.method ?? ""} ${MONTHS_ES[(p.month ?? 1) - 1] ?? ""}`
+    const text = `${p.students?.full_name ?? ""} ${p.students?.grades?.name ?? ""} ${p.students?.sections?.name ?? ""} ${p.description ?? ""} ${p.method ?? ""} ${p.receipt_number ?? ""} ${MONTHS_ES[(p.month ?? 1) - 1] ?? ""}`
       .toLowerCase();
 
     return text.includes(tableSearch.toLowerCase());
@@ -590,12 +624,13 @@ export default function Pagos() {
                           key={s.id}
                           className="p-3 hover:bg-muted cursor-pointer border-b last:border-b-0"
                           onClick={async () => {
-                            setForm({
+                            setForm((prev) => ({
+                              ...prev,
                               student_id: s.id,
                               charge_id: "",
                               recibido: "",
                               pay_currency: "USD",
-                            });
+                            }));
                             setSearch(s.full_name);
                             await loadStudentOpenCharges(s.id);
                           }}
@@ -709,22 +744,38 @@ export default function Pagos() {
                           </select>
                         </div>
 
-                        <FormField
-                          label="Recibido"
-                          hint={`Máximo ${payCurrency === "USD" ? "3" : "4"} cifras (${payCurrency === "USD" ? "999.99" : "9999.99"}).`}
-                        >
+                        <div>
+                          <label className="text-sm font-medium block mb-2">
+                            N° recibo (opcional)
+                          </label>
                           <Input
-                            inputMode="decimal"
-                            pattern="^[0-9]*([.,][0-9]{0,2})?$"
                             className="h-10 text-sm"
-                            value={String(form.recibido ?? "")}
-                            onChange={(e) => {
-                              const raw = e.target.value.replace(",", ".");
-                              if (!canApplyInputChange(raw, payCurrency)) return;
-                              setForm({ ...form, recibido: raw });
-                            }}
+                            placeholder="Correlativo sugerido; puedes editarlo"
+                            value={form.receipt_number}
+                            onChange={(e) =>
+                              setForm({ ...form, receipt_number: e.target.value })
+                            }
                           />
-                        </FormField>
+                        </div>
+
+                        <div className="md:col-span-2">
+                          <FormField
+                            label="Recibido"
+                            hint={`Máximo ${payCurrency === "USD" ? "3" : "4"} cifras (${payCurrency === "USD" ? "999.99" : "9999.99"}).`}
+                          >
+                            <Input
+                              inputMode="decimal"
+                              pattern="^[0-9]*([.,][0-9]{0,2})?$"
+                              className="h-10 text-sm"
+                              value={String(form.recibido ?? "")}
+                              onChange={(e) => {
+                                const raw = e.target.value.replace(",", ".");
+                                if (!canApplyInputChange(raw, payCurrency)) return;
+                                setForm({ ...form, recibido: raw });
+                              }}
+                            />
+                          </FormField>
+                        </div>
                       </div>
 
                       <div className="flex flex-wrap gap-2">
@@ -824,6 +875,7 @@ export default function Pagos() {
             <TableHead>Moneda</TableHead>
             <TableHead>Estado pago</TableHead>
             <TableHead>Fecha</TableHead>
+            <TableHead>N° recibo</TableHead>
             <TableHead>Acción</TableHead>
           </TableRow>
         </TableHeader>
@@ -831,7 +883,7 @@ export default function Pagos() {
         <TableBody>
           {filtered.length === 0 && (
             <TableRow>
-              <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+              <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                 No hay pagos registrados para este filtro.
               </TableCell>
             </TableRow>
@@ -863,13 +915,16 @@ export default function Pagos() {
                     timeZone: "America/Managua",
                   })}
                 </TableCell>
+                <TableCell className="text-muted-foreground text-sm">
+                  {receiptNumberForPrint(p.receipt_number, p.id)}
+                </TableCell>
                 <TableCell>
                   <Button
                     size="icon"
                     variant="outline"
                     onClick={() =>
                       imprimirReciboOficial({
-                        numero: String(p.id).slice(-5),
+                        numero: receiptNumberForPrint(p.receipt_number, p.id),
                         estudiante: p.students?.full_name,
                         grado: p.students?.grades?.name ?? "",
                         anio: String(year),

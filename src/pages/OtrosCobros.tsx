@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,6 +43,7 @@ import {
   isMissingTableError,
   mapSupabaseErrorToToast,
 } from "@/lib/errorHandling";
+import { receiptNumberForPrint, suggestNextReceiptNumber } from "@/lib/receiptNumber";
 
 type Student = {
   id: string;
@@ -75,6 +76,7 @@ function isAdminRole(role: string | undefined | null): boolean {
 
 type OtherPaymentRow = {
   id: string;
+  receipt_number?: string | null;
   item_name: string | null;
   amount: number;
   received_amount: number;
@@ -149,6 +151,7 @@ const fetchOtherPayments = async (year: number): Promise<OtherPaymentRow[]> => {
     .from("other_payments")
     .select(`
       id,
+      receipt_number,
       student_id,
       item_id,
       item_name,
@@ -185,7 +188,22 @@ export default function OtrosCobros() {
     received: "",
     currency: "NIO" as "NIO" | "USD",
     notes: "",
+    receipt_number: "",
   });
+
+  const prevOtherPaymentDialogOpen = useRef(false);
+  useEffect(() => {
+    const justOpened = openPayment && !prevOtherPaymentDialogOpen.current;
+    prevOtherPaymentDialogOpen.current = openPayment;
+    if (!justOpened) return;
+    let cancelled = false;
+    suggestNextReceiptNumber(year).then((n) => {
+      if (!cancelled) setPaymentForm((f) => ({ ...f, receipt_number: n }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [openPayment, year]);
   const [itemForm, setItemForm] = useState({
     name: "",
     category: "OTROS",
@@ -232,7 +250,7 @@ export default function OtrosCobros() {
     const term = tableSearch.trim().toLowerCase();
     if (!term) return payments;
     return payments.filter((p) =>
-      `${p.students?.full_name ?? ""} ${p.item_name ?? ""} ${p.payment_items?.category ?? ""} ${p.status ?? ""}`
+      `${p.students?.full_name ?? ""} ${p.item_name ?? ""} ${p.payment_items?.category ?? ""} ${p.status ?? ""} ${p.receipt_number ?? ""}`
         .toLowerCase()
         .includes(term)
     );
@@ -309,6 +327,7 @@ export default function OtrosCobros() {
       if (!selectedStudent || !selectedItem) throw new Error("Datos incompletos");
 
       const paymentDate = new Date().toISOString();
+      const receiptTrim = paymentForm.receipt_number.trim();
       const { data: inserted, error } = await supabase
         .from("other_payments")
         .insert({
@@ -323,6 +342,7 @@ export default function OtrosCobros() {
           payment_date: paymentDate,
           academic_year: year,
           notes: paymentForm.notes.trim() || null,
+          receipt_number: receiptTrim || null,
         })
         .select("id")
         .single();
@@ -337,6 +357,7 @@ export default function OtrosCobros() {
         receivedAmount: Number(receivedNum.toFixed(2)),
         currency,
         notes: paymentForm.notes.trim(),
+        receipt_number: receiptTrim || null,
       };
     },
     onSuccess: async (ctx) => {
@@ -361,7 +382,7 @@ export default function OtrosCobros() {
 
       setTimeout(() => {
         imprimirReciboOficial({
-          numero: String(ctx.id).slice(-5),
+          numero: receiptNumberForPrint(ctx.receipt_number, ctx.id),
           fecha: new Date(ctx.paymentDate).toLocaleDateString("es-NI", {
             timeZone: "America/Managua",
           }),
@@ -540,6 +561,7 @@ export default function OtrosCobros() {
                 received: "",
                 currency: "NIO",
                 notes: "",
+                receipt_number: "",
               });
               setStudentSearch("");
             }
@@ -728,7 +750,7 @@ export default function OtrosCobros() {
         <TableBody>
           {!loadingPayments && filteredPayments.length === 0 && (
             <TableRow>
-              <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+              <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                 No hay cobros especiales registrados para este año.
               </TableCell>
             </TableRow>
@@ -749,6 +771,9 @@ export default function OtrosCobros() {
                   timeZone: "America/Managua",
                 })}
               </TableCell>
+              <TableCell className="text-muted-foreground text-sm">
+                {receiptNumberForPrint(p.receipt_number, p.id)}
+              </TableCell>
               <TableCell className="text-center align-middle">
                 <Button
                   type="button"
@@ -765,7 +790,7 @@ export default function OtrosCobros() {
                         ? `${conceptoBase} — ${String(p.notes).trim()}`
                         : conceptoBase;
                     imprimirReciboOficial({
-                      numero: String(p.id).slice(-5),
+                      numero: receiptNumberForPrint(p.receipt_number, p.id),
                       fecha: new Date(p.payment_date).toLocaleDateString("es-NI", {
                         timeZone: "America/Managua",
                       }),

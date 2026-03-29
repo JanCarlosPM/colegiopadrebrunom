@@ -45,6 +45,7 @@ import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Tables } from "@/types/database.types";
+import { normalizeCurrency } from "@/lib/billing";
 
 /* ================= TIPOS ================= */
 
@@ -75,6 +76,8 @@ type GradePriceRow = {
   amount_nio?: number | null;
   amount_usd?: number | null;
   currency?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 type AppUserRow = { id: string; email: string; full_name: string | null; role: string; is_active: boolean };
 
@@ -118,7 +121,11 @@ const fetchGrades = async (): Promise<GradeRow[]> => {
 };
 
 const fetchGradePrices = async (): Promise<GradePriceRow[]> => {
-  const { data, error } = await supabase.from("grade_prices").select("*");
+  const { data, error } = await supabase
+    .from("grade_prices")
+    .select("*")
+    .order("updated_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false, nullsFirst: false });
   if (error) throw error;
   return (data ?? []) as GradePriceRow[];
 };
@@ -168,7 +175,7 @@ const Configuracion = () => {
     queryFn: fetchAppUsers,
   });
 
-  const { data: enrollmentPricing } = useQuery({
+  const { data: enrollmentPricing, isFetched: enrollmentPricingFetched } = useQuery({
     queryKey: ["enrollment-pricing"],
     queryFn: fetchEnrollmentPricing,
   });
@@ -190,9 +197,15 @@ const Configuracion = () => {
   });
   const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
 
+  /** Una fila por grado: si hay duplicados en BD, se usa la más reciente. */
   const gradePricesByGradeId = useMemo(() => {
     const map = new Map<string, GradePriceRow>();
-    gradePrices.forEach((price) => map.set(price.grade_id, price));
+    const ts = (p: GradePriceRow) =>
+      new Date(p.updated_at ?? p.created_at ?? 0).getTime();
+    const sorted = [...gradePrices].sort((a, b) => ts(b) - ts(a));
+    for (const price of sorted) {
+      if (!map.has(price.grade_id)) map.set(price.grade_id, price);
+    }
     return map;
   }, [gradePrices]);
 
@@ -212,18 +225,34 @@ const Configuracion = () => {
         reportes_semanales: settings.reportes_semanales ?? false,
         logo_url: settings.logo_url ?? null,
       });
-      setMatriculaNio(String(settings.matricula_amount_nio ?? 300));
-      setMatriculaUsd(String(settings.matricula_amount_usd ?? 8));
     }
   }, [settings]);
 
+  /**
+   * Matrícula: la fuente de verdad es `enrollment_pricing` (la usa el módulo Matrículas).
+   * No mezclar con `school_settings.matricula_*`: un segundo efecto los pisaba y volvía a 300 / 8.
+   */
   useEffect(() => {
-    if (!enrollmentPricing) return;
-    const amountNio = Number(enrollmentPricing.general_amount ?? 300);
-    const amountUsd = amountNio > 0 ? Number((amountNio / DEFAULT_EXCHANGE_RATE).toFixed(2)) : 8;
-    setMatriculaNio(String(amountNio));
-    setMatriculaUsd(String(amountUsd));
-  }, [enrollmentPricing]);
+    if (!enrollmentPricingFetched) return;
+
+    if (enrollmentPricing) {
+      const currency = normalizeCurrency(String(enrollmentPricing.currency ?? "NIO"));
+      const amount = Number(enrollmentPricing.general_amount ?? 300);
+      if (currency === "USD") {
+        setMatriculaUsd(String(amount));
+        setMatriculaNio(String(Number((amount * DEFAULT_EXCHANGE_RATE).toFixed(2))));
+      } else {
+        setMatriculaNio(String(amount));
+        setMatriculaUsd(String(Number((amount / DEFAULT_EXCHANGE_RATE).toFixed(2))));
+      }
+      return;
+    }
+
+    if (settings) {
+      setMatriculaNio(String(settings.matricula_amount_nio ?? 300));
+      setMatriculaUsd(String(settings.matricula_amount_usd ?? 8));
+    }
+  }, [enrollmentPricingFetched, enrollmentPricing, settings]);
 
   useEffect(() => {
     const next: Record<string, { nio: string; usd: string }> = {};
@@ -328,6 +357,7 @@ const Configuracion = () => {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["grade-prices"] });
+      qc.invalidateQueries({ queryKey: ["grade-price"] });
       toast.success("Precios guardados");
     },
     onError: (e: Error) => toast.error(e.message || "Error al guardar precios"),
@@ -418,8 +448,6 @@ const Configuracion = () => {
       const pricingPayload = {
         general_amount: nio,
         currency: "NIO",
-        discount_siblings_enabled: false,
-        pronto_pago_enabled: false,
         updated_at: new Date().toISOString(),
       };
 
@@ -444,6 +472,7 @@ const Configuracion = () => {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["enrollment-pricing"] });
+      qc.invalidateQueries({ queryKey: ["matriculas"] });
       toast.success("Matrícula guardada.");
     },
     onError: (e: Error) => toast.error(e.message || "Error al guardar matrícula"),

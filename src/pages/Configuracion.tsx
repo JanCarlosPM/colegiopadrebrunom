@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -97,6 +97,16 @@ const DEFAULT_MONTHLY_NIO = 770;
 const DEFAULT_MONTHLY_USD = 21;
 const DEFAULT_EXCHANGE_RATE = 36.67;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Parseo flexible para campos de texto (coma o punto decimal). */
+const parseMoneyInput = (raw: string): number | null => {
+  const t = String(raw ?? "").trim().replace(",", ".");
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+};
+
+const MATRICULA_AUTOSAVE_MS = 900;
 
 /* ================= FETCHERS ================= */
 
@@ -229,44 +239,70 @@ const Configuracion = () => {
   }, [settings]);
 
   /**
-   * Matrícula: la fuente de verdad es `enrollment_pricing` (la usa el módulo Matrículas).
-   * No mezclar con `school_settings.matricula_*`: un segundo efecto los pisaba y volvía a 300 / 8.
+   * Matrícula: fuente `enrollment_pricing`. Solo rellenar desde el servidor cuando cambian
+   * los datos reales (huella), no en cada refetch con el mismo contenido — si no, se pisa lo que el usuario escribe.
    */
+  const matriculaServerSyncKeyRef = useRef<string>("");
   useEffect(() => {
     if (!enrollmentPricingFetched) return;
+
+    let syncKey = "";
+    let nioStr = "";
+    let usdStr = "";
 
     if (enrollmentPricing) {
       const currency = normalizeCurrency(String(enrollmentPricing.currency ?? "NIO"));
       const amount = Number(enrollmentPricing.general_amount ?? 300);
+      syncKey = `ep:${enrollmentPricing.id}:${enrollmentPricing.general_amount}:${enrollmentPricing.currency}:${enrollmentPricing.updated_at ?? ""}`;
       if (currency === "USD") {
-        setMatriculaUsd(String(amount));
-        setMatriculaNio(String(Number((amount * DEFAULT_EXCHANGE_RATE).toFixed(2))));
+        usdStr = String(amount);
+        nioStr = String(Number((amount * DEFAULT_EXCHANGE_RATE).toFixed(2)));
       } else {
-        setMatriculaNio(String(amount));
-        setMatriculaUsd(String(Number((amount / DEFAULT_EXCHANGE_RATE).toFixed(2))));
+        nioStr = String(amount);
+        usdStr = String(Number((amount / DEFAULT_EXCHANGE_RATE).toFixed(2)));
       }
+    } else if (settings) {
+      syncKey = `ss:${settings.matricula_amount_nio ?? ""}:${settings.matricula_amount_usd ?? ""}`;
+      nioStr = String(settings.matricula_amount_nio ?? 300);
+      usdStr = String(settings.matricula_amount_usd ?? 8);
+    } else {
       return;
     }
 
-    if (settings) {
-      setMatriculaNio(String(settings.matricula_amount_nio ?? 300));
-      setMatriculaUsd(String(settings.matricula_amount_usd ?? 8));
-    }
+    if (syncKey === matriculaServerSyncKeyRef.current) return;
+    matriculaServerSyncKeyRef.current = syncKey;
+    setMatriculaNio(nioStr);
+    setMatriculaUsd(usdStr);
   }, [enrollmentPricingFetched, enrollmentPricing, settings]);
 
+  const gradePricesServerSyncKeyRef = useRef<string>("");
   useEffect(() => {
+    if (loadingGrades || loadingPrices || grades.length === 0) return;
+
+    const gradeIds = grades
+      .map((g) => g.id)
+      .sort()
+      .join(",");
+    const priceSig = [...gradePrices]
+      .sort((a, b) => a.grade_id.localeCompare(b.grade_id))
+      .map(
+        (p) =>
+          `${p.grade_id}:${p.monthly_amount ?? ""}:${p.monthly_amount_usd ?? ""}:${p.updated_at ?? p.created_at ?? ""}`,
+      )
+      .join("|");
+    const syncKey = `${gradeIds}#${priceSig}`;
+
+    if (syncKey === gradePricesServerSyncKeyRef.current) return;
+    gradePricesServerSyncKeyRef.current = syncKey;
+
     const next: Record<string, { nio: string; usd: string }> = {};
     grades.forEach((g) => {
       const pr = gradePricesByGradeId.get(g.id);
       const nioValue = Number(
-        pr?.monthly_amount ??
-        pr?.amount_nio ??
-        DEFAULT_MONTHLY_NIO
+        pr?.monthly_amount ?? pr?.amount_nio ?? DEFAULT_MONTHLY_NIO,
       );
       const usdValue = Number(
-        pr?.monthly_amount_usd ??
-        pr?.amount_usd ??
-        DEFAULT_MONTHLY_USD
+        pr?.monthly_amount_usd ?? pr?.amount_usd ?? DEFAULT_MONTHLY_USD,
       );
       next[g.id] = {
         nio: String(nioValue),
@@ -274,7 +310,7 @@ const Configuracion = () => {
       };
     });
     setPreciosByGrade(next);
-  }, [grades, gradePricesByGradeId]);
+  }, [grades, gradePrices, gradePricesByGradeId, loadingGrades, loadingPrices]);
 
   const currentYear = new Date().getFullYear();
   const yearOptions = [currentYear - 1, currentYear, currentYear + 1];
@@ -311,22 +347,23 @@ const Configuracion = () => {
   });
 
   const savePrecios = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (snapshot: Record<string, { nio: string; usd: string }>) => {
       for (const g of grades) {
-        const vals = preciosByGrade[g.id];
+        const vals = snapshot[g.id];
         if (!vals) continue;
-        const amountNio = Number(vals.nio);
-        const amountUsd = Number(vals.usd);
-        if (!Number.isFinite(amountNio) || amountNio <= 0 || !Number.isFinite(amountUsd) || amountUsd <= 0) {
+        const amountNio = parseMoneyInput(vals.nio);
+        const amountUsd = parseMoneyInput(vals.usd);
+        if (amountNio == null || amountNio <= 0 || amountUsd == null || amountUsd <= 0) {
           throw new Error(`Precio inválido en "${g.name}". Verifica C$ y USD.`);
         }
       }
 
       for (const g of grades) {
-        const vals = preciosByGrade[g.id];
+        const vals = snapshot[g.id];
         if (!vals) continue;
-        const amountNio = Number(vals.nio) || 0;
-        const amountUsd = Number(vals.usd) || 0;
+        const amountNio = parseMoneyInput(vals.nio);
+        const amountUsd = parseMoneyInput(vals.usd);
+        if (amountNio == null || amountUsd == null) continue;
         const existing = gradePricesByGradeId.get(g.id);
         const now = new Date().toISOString();
 
@@ -337,7 +374,7 @@ const Configuracion = () => {
           updated_at: now,
         };
 
-        if (existing) {
+        if (existing?.id) {
           const { error: updateErr } = await supabase
             .from("grade_prices")
             .update(newSchemaPayload)
@@ -387,8 +424,8 @@ const Configuracion = () => {
     setPreciosByGrade((prev) => {
       const next = { ...prev };
       grades.forEach((g) => {
-        const nio = Number(next[g.id]?.nio || 0);
-        if (Number.isFinite(nio) && nio > 0) {
+        const nio = parseMoneyInput(next[g.id]?.nio ?? "");
+        if (nio != null && nio > 0) {
           next[g.id] = {
             nio: String(format2(nio)),
             usd: String(format2(nio / safeRate)),
@@ -398,20 +435,25 @@ const Configuracion = () => {
       return next;
     });
 
-    const currentMatriculaNio = Number(matriculaNio || 0);
-    if (Number.isFinite(currentMatriculaNio) && currentMatriculaNio > 0) {
+    const currentMatriculaNio = parseMoneyInput(matriculaNio);
+    if (currentMatriculaNio != null && currentMatriculaNio > 0) {
       setMatriculaUsd(String(format2(currentMatriculaNio / safeRate)));
     }
     toast.success("Tipo de cambio aplicado a los montos actuales.");
   };
 
   const saveSingleGradePrice = useMutation({
-    mutationFn: async (grade: GradeRow) => {
-      const vals = preciosByGrade[grade.id];
-      if (!vals) throw new Error("No hay valores para este grado.");
-      const amountNio = Number(vals.nio);
-      const amountUsd = Number(vals.usd);
-      if (!Number.isFinite(amountNio) || amountNio <= 0 || !Number.isFinite(amountUsd) || amountUsd <= 0) {
+    mutationFn: async ({
+      grade,
+      vals,
+    }: {
+      grade: GradeRow;
+      vals: { nio: string; usd: string };
+      silent?: boolean;
+    }) => {
+      const amountNio = parseMoneyInput(vals.nio);
+      const amountUsd = parseMoneyInput(vals.usd);
+      if (amountNio == null || amountNio <= 0 || amountUsd == null || amountUsd <= 0) {
         throw new Error(`Precio inválido en "${grade.name}".`);
       }
 
@@ -431,19 +473,22 @@ const Configuracion = () => {
         if (error) throw error;
       }
     },
-    onSuccess: () => {
+    onSuccess: (_d, variables) => {
       qc.invalidateQueries({ queryKey: ["grade-prices"] });
-      toast.success("Precio de grado guardado.");
+      qc.invalidateQueries({ queryKey: ["grade-price"] });
+      if (!variables?.silent) toast.success("Precio de grado guardado.");
     },
     onError: (e: Error) => toast.error(e.message || "Error al guardar el grado"),
   });
 
+  type SaveMatriculaInput = { nioStr: string; usdStr: string; silent?: boolean };
+
   const saveMatricula = useMutation({
-    mutationFn: async () => {
-      const nio = Number(matriculaNio);
-      const usd = Number(matriculaUsd);
-      if (!Number.isFinite(nio) || nio <= 0) throw new Error("La matrícula en C$ debe ser mayor que cero.");
-      if (!Number.isFinite(usd) || usd <= 0) throw new Error("La matrícula en USD debe ser mayor que cero.");
+    mutationFn: async ({ nioStr, usdStr }: SaveMatriculaInput) => {
+      const nio = parseMoneyInput(nioStr);
+      const usd = parseMoneyInput(usdStr);
+      if (nio == null || nio <= 0) throw new Error("La matrícula en C$ debe ser mayor que cero.");
+      if (usd == null || usd <= 0) throw new Error("La matrícula en USD debe ser mayor que cero.");
 
       const pricingPayload = {
         general_amount: nio,
@@ -470,13 +515,45 @@ const Configuracion = () => {
         if (error) throw error;
       }
     },
-    onSuccess: () => {
+    onSuccess: (_d, variables) => {
       qc.invalidateQueries({ queryKey: ["enrollment-pricing"] });
       qc.invalidateQueries({ queryKey: ["matriculas"] });
-      toast.success("Matrícula guardada.");
+      if (!variables?.silent) toast.success("Matrícula guardada.");
     },
     onError: (e: Error) => toast.error(e.message || "Error al guardar matrícula"),
   });
+
+  const preciosByGradeRef = useRef(preciosByGrade);
+  preciosByGradeRef.current = preciosByGrade;
+  const matriculaFieldsRef = useRef({ nio: matriculaNio, usd: matriculaUsd });
+  matriculaFieldsRef.current = { nio: matriculaNio, usd: matriculaUsd };
+  const saveMatriculaMutRef = useRef(saveMatricula.mutate);
+  saveMatriculaMutRef.current = saveMatricula.mutate;
+
+  useEffect(() => {
+    if (!enrollmentPricingFetched) return;
+    const { nio: nStr, usd: uStr } = matriculaFieldsRef.current;
+    const nio = parseMoneyInput(nStr);
+    const usd = parseMoneyInput(uStr);
+    if (nio == null || usd == null || nio <= 0 || usd <= 0) return;
+
+    if (enrollmentPricing && normalizeCurrency(String(enrollmentPricing.currency ?? "NIO")) === "NIO") {
+      const g = Number(enrollmentPricing.general_amount ?? 0);
+      if (Math.abs(g - nio) < 0.01) {
+        const expUsd = g / DEFAULT_EXCHANGE_RATE;
+        if (Math.abs(expUsd - usd) < 0.05) return;
+      }
+    }
+
+    const t = window.setTimeout(() => {
+      const latest = matriculaFieldsRef.current;
+      const n = parseMoneyInput(latest.nio);
+      const u = parseMoneyInput(latest.usd);
+      if (n == null || u == null || n <= 0 || u <= 0) return;
+      saveMatriculaMutRef.current({ nioStr: latest.nio, usdStr: latest.usd, silent: true });
+    }, MATRICULA_AUTOSAVE_MS);
+    return () => window.clearTimeout(t);
+  }, [matriculaNio, matriculaUsd, enrollmentPricingFetched, enrollmentPricing]);
 
   const createOrUpdateUser = useMutation({
     mutationFn: async () => {
@@ -908,7 +985,14 @@ const Configuracion = () => {
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">Mensualidades</CardTitle>
-                <CardDescription>Montos mensuales por grado (C$ y USD) según tipo de cambio</CardDescription>
+                <CardDescription className="space-y-2">
+                  <span>
+                    Precios por grado en texto (coma o punto). Al terminar de editar un grado y salir del campo (clic fuera), se guarda en la base. También puedes usar <strong>Guardar</strong> por fila o <strong>Guardar precios</strong> para todos.
+                  </span>
+                  <span className="block text-foreground/90">
+                    <strong>Historial:</strong> cada mensualidad ya cargada en el sistema mantiene su monto. Los cambios aquí definen el precio para <strong>nuevos</strong> meses que se generen (por ejemplo al matricular) y como referencia del grado; no reescribe pagos ni cargos pasados.
+                  </span>
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {loadingGrades || loadingPrices ? (
@@ -953,58 +1037,81 @@ const Configuracion = () => {
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-muted-foreground">C$</span>
                           <Input
-                            type="number"
-                            min={0}
-                            step={1}
-                            className="w-24 text-right"
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
+                            className="w-28 text-right font-mono text-sm"
                             value={preciosByGrade[g.id]?.nio ?? ""}
                             onChange={(e) => {
                               const nioRaw = e.target.value;
-                              const nio = Number(nioRaw);
+                              const nio = parseMoneyInput(nioRaw);
                               setPreciosByGrade((prev) => ({
                                 ...prev,
                                 [g.id]: {
                                   ...(prev[g.id] ?? { nio: "", usd: "" }),
                                   nio: nioRaw,
-                                  usd: Number.isFinite(nio) && nio > 0 ? String(format2(nio / rate)) : "",
+                                  usd: nio != null && nio > 0 ? String(format2(nio / rate)) : (prev[g.id]?.usd ?? ""),
                                 },
                               }));
+                            }}
+                            onBlur={() => {
+                              const vals = preciosByGradeRef.current[g.id];
+                              if (!vals) return;
+                              const nio = parseMoneyInput(vals.nio);
+                              const usd = parseMoneyInput(vals.usd);
+                              if (nio == null || usd == null || nio <= 0 || usd <= 0) return;
+                              saveSingleGradePrice.mutate({ grade: g, vals, silent: true });
                             }}
                           />
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-muted-foreground">$</span>
                           <Input
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            className="w-24 text-right"
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
+                            className="w-28 text-right font-mono text-sm"
                             value={preciosByGrade[g.id]?.usd ?? ""}
                             onChange={(e) => {
                               const usdRaw = e.target.value;
-                              const usd = Number(usdRaw);
+                              const usd = parseMoneyInput(usdRaw);
                               setPreciosByGrade((prev) => ({
                                 ...prev,
                                 [g.id]: {
                                   ...(prev[g.id] ?? { nio: "", usd: "" }),
                                   usd: usdRaw,
-                                  nio: Number.isFinite(usd) && usd > 0 ? String(format2(usd * rate)) : "",
+                                  nio: usd != null && usd > 0 ? String(format2(usd * rate)) : (prev[g.id]?.nio ?? ""),
                                 },
                               }));
+                            }}
+                            onBlur={() => {
+                              const vals = preciosByGradeRef.current[g.id];
+                              if (!vals) return;
+                              const nio = parseMoneyInput(vals.nio);
+                              const usd = parseMoneyInput(vals.usd);
+                              if (nio == null || usd == null || nio <= 0 || usd <= 0) return;
+                              saveSingleGradePrice.mutate({ grade: g, vals, silent: true });
                             }}
                           />
                         </div>
                         <Button
                           type="button"
                           variant="outline"
-                          onClick={() => saveSingleGradePrice.mutate(g)}
+                          onClick={() => {
+                            const vals = preciosByGrade[g.id];
+                            if (vals) saveSingleGradePrice.mutate({ grade: g, vals });
+                          }}
                           disabled={saveSingleGradePrice.isPending}
                         >
                           Guardar
                         </Button>
                       </div>
                     ))}
-                    <Button className="w-full mt-4" onClick={() => savePrecios.mutate()} disabled={savePrecios.isPending}>
+                    <Button
+                      className="w-full mt-4"
+                      onClick={() => savePrecios.mutate(preciosByGrade)}
+                      disabled={savePrecios.isPending}
+                    >
                       {savePrecios.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
                       Guardar Precios
                     </Button>
@@ -1016,29 +1123,59 @@ const Configuracion = () => {
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">Matrícula</CardTitle>
-                <CardDescription>Monto base de matrícula</CardDescription>
+                <CardDescription className="space-y-2">
+                  <span>
+                    Monto base en texto. Se guarda en la base al dejar de escribir unos segundos o con <strong>Guardar matrícula</strong>. En córdobas es el valor que queda registrado; el USD se sincroniza con el tipo de cambio de la izquierda.
+                  </span>
+                  <span className="block text-foreground/90">
+                    <strong>Historial:</strong> las matrículas ya creadas conservan su monto total y lo pagado. Este precio solo orienta <strong>nuevas</strong> matrículas o saldos nuevos.
+                  </span>
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
                   <Label className="input-label">Monto Matrícula C$ (córdobas)</Label>
                   <Input
-                    type="number"
-                    min={0}
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    className="font-mono"
                     value={matriculaNio}
-                    onChange={(e) => setMatriculaNio(e.target.value)}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      const n = parseMoneyInput(raw);
+                      setMatriculaNio(raw);
+                      if (n != null && n > 0) {
+                        setMatriculaUsd(String(format2(n / rate)));
+                      }
+                    }}
                   />
                 </div>
                 <div>
                   <Label className="input-label">Monto Matrícula USD (dólares)</Label>
                   <Input
-                    type="number"
-                    min={0}
-                    step={0.01}
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    className="font-mono"
                     value={matriculaUsd}
-                    onChange={(e) => setMatriculaUsd(e.target.value)}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      const u = parseMoneyInput(raw);
+                      setMatriculaUsd(raw);
+                      if (u != null && u > 0) {
+                        setMatriculaNio(String(format2(u * rate)));
+                      }
+                    }}
                   />
                 </div>
-                <Button className="w-full mt-4" onClick={() => saveMatricula.mutate()} disabled={saveMatricula.isPending}>
+                <Button
+                  className="w-full mt-4"
+                  onClick={() =>
+                    saveMatricula.mutate({ nioStr: matriculaNio, usdStr: matriculaUsd })
+                  }
+                  disabled={saveMatricula.isPending}
+                >
                   {saveMatricula.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
                   Guardar Matrícula
                 </Button>

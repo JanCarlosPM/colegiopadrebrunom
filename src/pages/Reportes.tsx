@@ -13,7 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Download, Users, DollarSign, AlertTriangle } from "lucide-react";
+import { FileText, Download, Users, DollarSign, AlertTriangle, Filter } from "lucide-react";
 import {
   MONTHS_ES,
   convertCurrency,
@@ -118,6 +118,22 @@ type OtherPaymentReportRow = {
 };
 
 type ReportRow = Record<string, string | number | null | undefined>;
+
+type ReportFiltersState = {
+  anio: string;
+  grado: string;
+  mes: string;
+  fechaDesde: string;
+  fechaHasta: string;
+};
+
+const defaultReportFilters = (): ReportFiltersState => ({
+  anio: new Date().getFullYear().toString(),
+  grado: "todos",
+  mes: "todos",
+  fechaDesde: "",
+  fechaHasta: "",
+});
 
 const EMPTY_STUDENTS: StudentReportRow[] = [];
 const EMPTY_ENROLLMENTS: EnrollmentReportRow[] = [];
@@ -237,21 +253,28 @@ export default function Reportes() {
   const otherPayments = data?.otherPayments ?? EMPTY_OTHER_PAYMENTS;
 
   const [tipoReporte, setTipoReporte] = useState("resumen-ejecutivo");
-  const [grado, setGrado] = useState("todos");
-  const [anio, setAnio] = useState(new Date().getFullYear().toString());
-  const [mes, setMes] = useState("todos");
-  const [fechaDesde, setFechaDesde] = useState("");
-  const [fechaHasta, setFechaHasta] = useState("");
+  const [filterDraft, setFilterDraft] = useState<ReportFiltersState>(() => defaultReportFilters());
+  const [filterApplied, setFilterApplied] = useState<ReportFiltersState>(() => defaultReportFilters());
   const [exporting, setExporting] = useState<"pdf" | "excel" | null>(null);
 
-  const year = Number(anio);
+  const filtersDirty = useMemo(
+    () =>
+      filterDraft.anio !== filterApplied.anio ||
+      filterDraft.grado !== filterApplied.grado ||
+      filterDraft.mes !== filterApplied.mes ||
+      filterDraft.fechaDesde !== filterApplied.fechaDesde ||
+      filterDraft.fechaHasta !== filterApplied.fechaHasta,
+    [filterDraft, filterApplied]
+  );
+
+  const year = Number(filterApplied.anio);
 
   const filteredStudents = useMemo(
     () =>
-      grado === "todos"
+      filterApplied.grado === "todos"
         ? students
-        : students.filter((s) => s.grades?.name === grado),
-    [students, grado]
+        : students.filter((s) => s.grades?.name === filterApplied.grado),
+    [students, filterApplied.grado]
   );
 
   const studentsById = useMemo(() => {
@@ -405,11 +428,13 @@ export default function Reportes() {
 
     if (tipoReporte === "caja") {
       let list = [...payments];
-      if (fechaDesde) {
-        list = list.filter((p: { paid_at?: string }) => new Date(p.paid_at || 0) >= new Date(fechaDesde));
+      if (filterApplied.fechaDesde) {
+        list = list.filter(
+          (p: { paid_at?: string }) => new Date(p.paid_at || 0) >= new Date(filterApplied.fechaDesde)
+        );
       }
-      if (fechaHasta) {
-        const end = new Date(fechaHasta);
+      if (filterApplied.fechaHasta) {
+        const end = new Date(filterApplied.fechaHasta);
         end.setHours(23, 59, 59, 999);
         list = list.filter((p: { paid_at?: string }) => new Date(p.paid_at || 0) <= end);
       }
@@ -436,9 +461,13 @@ export default function Reportes() {
       const conCambio = payments.filter((p: { change_amount?: number }) => Number(p.change_amount || 0) > 0);
       let list = conCambio;
       if (year) list = list.filter((p: { academic_year?: number }) => Number(p.academic_year) === year);
-      if (fechaDesde) list = list.filter((p: { paid_at?: string }) => new Date(p.paid_at || 0) >= new Date(fechaDesde));
-      if (fechaHasta) {
-        const end = new Date(fechaHasta);
+      if (filterApplied.fechaDesde) {
+        list = list.filter(
+          (p: { paid_at?: string }) => new Date(p.paid_at || 0) >= new Date(filterApplied.fechaDesde)
+        );
+      }
+      if (filterApplied.fechaHasta) {
+        const end = new Date(filterApplied.fechaHasta);
         end.setHours(23, 59, 59, 999);
         list = list.filter((p: { paid_at?: string }) => new Date(p.paid_at || 0) <= end);
       }
@@ -484,16 +513,20 @@ export default function Reportes() {
     }
 
     if (tipoReporte === "estudiantes") {
-      return filteredStudents
-        .filter((s: { status?: string }) => s.status === "ACTIVO")
-        .map((s) => ({
+      return filteredStudents.map((s) => {
+        const enrollment = enrollmentsInYear.find((e) => e.student_id === s.id);
+        return {
+          codigo: s.student_code?.trim() || "—",
           nombre: s.full_name,
           grado: s.grades?.name ?? "—",
           seccion: s.sections?.name ?? "—",
           encargado: s.guardians?.full_name ?? "—",
           telefono: s.guardians?.phone ?? "—",
-          estado: s.status ?? "—",
-        }));
+          estado_estudiante: s.status ?? "—",
+          matricula_año: enrollment ? "Sí" : "No",
+          estado_matricula: enrollment?.status ?? "—",
+        };
+      });
     }
 
     if (tipoReporte === "matriculas") {
@@ -520,7 +553,7 @@ export default function Reportes() {
         const studentCharges = chargesInYear.filter(
           (c) =>
             s.id === c.student_id &&
-            (mes === "todos" || Number(c.month) === Number(mes))
+            (filterApplied.mes === "todos" || Number(c.month) === Number(filterApplied.mes))
         );
         studentCharges.forEach((c) => {
           rows.push({
@@ -540,9 +573,12 @@ export default function Reportes() {
 
     if (tipoReporte === "pagos") {
       const rows: ReportRow[] = [];
-      const filtered = mes === "todos"
-        ? paymentsInYear
-        : paymentsInYear.filter((p) => p.concept !== "MENSUALIDAD" || Number(p.month) === Number(mes));
+      const filtered =
+        filterApplied.mes === "todos"
+          ? paymentsInYear
+          : paymentsInYear.filter(
+              (p) => p.concept !== "MENSUALIDAD" || Number(p.month) === Number(filterApplied.mes)
+            );
       filtered.forEach((p) => {
         const s = studentsById.get(p.student_id);
         rows.push({
@@ -765,9 +801,7 @@ export default function Reportes() {
     otherPayments,
     studentsById,
     year,
-    mes,
-    fechaDesde,
-    fechaHasta,
+    filterApplied,
   ]);
 
   const summaryCards = useMemo(() => {
@@ -797,7 +831,7 @@ export default function Reportes() {
       const workbook = XLSX.utils.book_new();
       const sheetName = REPORT_TYPES.find((t) => t.value === tipoReporte)?.label ?? "Reporte";
       XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31));
-      const nombre = `reporte_${tipoReporte}_${anio}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const nombre = `reporte_${tipoReporte}_${filterApplied.anio}_${new Date().toISOString().slice(0, 10)}.xlsx`;
       XLSX.writeFile(workbook, nombre);
     } catch (error) {
       console.error(error);
@@ -820,7 +854,11 @@ export default function Reportes() {
       doc.setFontSize(14);
       doc.text(`Reporte: ${title}`, 14, 15);
       doc.setFontSize(10);
-      doc.text(`Año: ${anio}  |  Generado: ${new Date().toLocaleDateString("es-NI")}`, 14, 22);
+      doc.text(
+        `Año: ${filterApplied.anio}  |  Generado: ${new Date().toLocaleDateString("es-NI")}`,
+        14,
+        22
+      );
 
       const headers = reportData.length > 0 ? Object.keys(reportData[0]).filter((k) => !k.startsWith("total_")) : [];
       const body = (reportData as ReportRow[]).map((r) => headers.map((h) => (r[h] != null ? String(r[h]) : "—")));
@@ -832,7 +870,7 @@ export default function Reportes() {
         styles: { fontSize: 8 },
       });
 
-      doc.save(`reporte_${tipoReporte}_${anio}.pdf`);
+      doc.save(`reporte_${tipoReporte}_${filterApplied.anio}.pdf`);
     } catch (error) {
       console.error(error);
       toast.error("No se pudo exportar el PDF.");
@@ -863,7 +901,11 @@ export default function Reportes() {
       <Card className="p-4 mb-6">
         <CardHeader className="p-0 mb-4">
           <CardTitle className="text-base">Filtros</CardTitle>
-          <CardDescription>Seleccione el tipo de reporte y los criterios</CardDescription>
+          <CardDescription>
+            Elegí el tipo de reporte. Ajustá año, grado, mes o fechas y pulsá{" "}
+            <span className="font-medium text-foreground">Aplicar filtros</span> para actualizar la tabla y las
+            exportaciones.
+          </CardDescription>
         </CardHeader>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <div className="space-y-2">
@@ -893,15 +935,18 @@ export default function Reportes() {
               type="number"
               min="2020"
               max="2030"
-              value={anio}
-              onChange={(e) => setAnio(e.target.value)}
+              value={filterDraft.anio}
+              onChange={(e) => setFilterDraft((d) => ({ ...d, anio: e.target.value }))}
             />
           </div>
 
           {showMes && (
             <div className="space-y-2">
               <Label>Mes</Label>
-              <Select value={mes} onValueChange={setMes}>
+              <Select
+                value={filterDraft.mes}
+                onValueChange={(v) => setFilterDraft((d) => ({ ...d, mes: v }))}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -920,7 +965,10 @@ export default function Reportes() {
           {tipoReporte !== "estudiantes-por-grado" && tipoReporte !== "matriculas-por-estado" && tipoReporte !== "resumen-ejecutivo" && tipoReporte !== "ingresos-por-mes" && (
             <div className="space-y-2">
               <Label>Grado</Label>
-              <Select value={grado} onValueChange={setGrado}>
+              <Select
+                value={filterDraft.grado}
+                onValueChange={(v) => setFilterDraft((d) => ({ ...d, grado: v }))}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Grado" />
                 </SelectTrigger>
@@ -940,13 +988,40 @@ export default function Reportes() {
             <>
               <div className="space-y-2">
                 <Label>Desde</Label>
-                <Input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} />
+                <Input
+                  type="date"
+                  value={filterDraft.fechaDesde}
+                  onChange={(e) => setFilterDraft((d) => ({ ...d, fechaDesde: e.target.value }))}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Hasta</Label>
-                <Input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} />
+                <Input
+                  type="date"
+                  value={filterDraft.fechaHasta}
+                  onChange={(e) => setFilterDraft((d) => ({ ...d, fechaHasta: e.target.value }))}
+                />
               </div>
             </>
+          )}
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            onClick={() => setFilterApplied({ ...filterDraft })}
+            disabled={!filtersDirty}
+            className="gap-2"
+          >
+            <Filter className="h-4 w-4" />
+            Aplicar filtros
+          </Button>
+          {filtersDirty ? (
+            <span className="text-sm text-amber-600 dark:text-amber-500">
+              Tenés cambios sin aplicar: la tabla sigue usando los filtros anteriores.
+            </span>
+          ) : (
+            <span className="text-sm text-muted-foreground">Filtros aplicados al reporte y a PDF/Excel.</span>
           )}
         </div>
       </Card>

@@ -60,7 +60,7 @@ export type Database = {
           amount: number | null;
           paid_amount: number | null;
           currency: string | null;
-          status: string | null;
+          status: Database["public"]["Enums"]["charge_status"] | null;
           created_at: string | null;
         };
         Insert: {
@@ -74,7 +74,7 @@ export type Database = {
           amount?: number | null;
           paid_amount?: number | null;
           currency?: string | null;
-          status?: string | null;
+          status?: Database["public"]["Enums"]["charge_status"] | null;
           created_at?: string | null;
         };
         Update: {
@@ -88,7 +88,7 @@ export type Database = {
           amount?: number | null;
           paid_amount?: number | null;
           currency?: string | null;
-          status?: string | null;
+          status?: Database["public"]["Enums"]["charge_status"] | null;
           created_at?: string | null;
         };
         Relationships: [];
@@ -497,7 +497,9 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
-    Enums: Record<string, never>;
+    Enums: {
+      charge_status: "PENDIENTE" | "PARCIAL" | "PAGADO";
+    };
     CompositeTypes: Record<string, never>;
   };
 };

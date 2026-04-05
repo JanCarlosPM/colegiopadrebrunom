@@ -407,10 +407,8 @@ export default function Pagos() {
             ? freshAmountAppliedInPayCurrency / safeRate
             : freshAmountAppliedInPayCurrency * safeRate;
 
-      const newPaidAmount = freshPaid + freshAmountAppliedInChargeCurrency;
-
       const newStatus =
-        newPaidAmount + 0.0001 >= freshAmount
+        freshPaid + freshAmountAppliedInChargeCurrency + 0.0001 >= freshAmount
           ? "PAGADO"
           : "PARCIAL";
 
@@ -444,13 +442,7 @@ export default function Pagos() {
       if (payErr) throw payErr;
       if (!insertedPay?.id) throw new Error("PAYMENT_INSERT_FAILED");
 
-      const { error: chargeErr } = await supabase.rpc("set_charge_paid_state", {
-        p_charge_id: freshCharge.id,
-        p_paid_amount: Number(newPaidAmount.toFixed(2)),
-        p_status: newStatus,
-      });
-
-      if (chargeErr) throw chargeErr;
+      // El cargo lo actualiza public.apply_payment_to_charge() (trigger en payments).
 
       return {
         paidAt,

@@ -577,14 +577,7 @@ export async function importMonthlyPayments(
       paymentDupKeys.add(dupKey);
     }
 
-    if (!dryRun) {
-      const { error: chargeUpdateErr } = await supabase.rpc("set_charge_paid_state", {
-        p_charge_id: charge.id,
-        p_paid_amount: Number(nextPaid.toFixed(2)),
-        p_status: newStatus,
-      });
-      if (chargeUpdateErr) throw chargeUpdateErr;
-    }
+    // paid_amount/status del cargo: trigger public.apply_payment_to_charge() en payments.
 
     chargeRollingState.set(charge.id, {
       amount: totalCharge,

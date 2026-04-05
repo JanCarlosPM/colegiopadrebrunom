@@ -496,7 +496,16 @@ export type Database = {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      set_charge_paid_state: {
+        Args: {
+          p_charge_id: string;
+          p_paid_amount: number;
+          p_status: string;
+        };
+        Returns: undefined;
+      };
+    };
     Enums: {
       charge_status: "PENDIENTE" | "PARCIAL" | "PAGADO";
     };

@@ -578,13 +578,11 @@ export async function importMonthlyPayments(
     }
 
     if (!dryRun) {
-      const { error: chargeUpdateErr } = await supabase
-        .from("charges")
-        .update({
-          paid_amount: Number(nextPaid.toFixed(2)),
-          status: newStatus,
-        })
-        .eq("id", charge.id);
+      const { error: chargeUpdateErr } = await supabase.rpc("set_charge_paid_state", {
+        p_charge_id: charge.id,
+        p_paid_amount: Number(nextPaid.toFixed(2)),
+        p_status: newStatus,
+      });
       if (chargeUpdateErr) throw chargeUpdateErr;
     }
 

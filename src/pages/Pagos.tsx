@@ -444,13 +444,11 @@ export default function Pagos() {
       if (payErr) throw payErr;
       if (!insertedPay?.id) throw new Error("PAYMENT_INSERT_FAILED");
 
-      const { error: chargeErr } = await supabase
-        .from("charges")
-        .update({
-          paid_amount: Number(newPaidAmount.toFixed(2)),
-          status: newStatus,
-        })
-        .eq("id", freshCharge.id);
+      const { error: chargeErr } = await supabase.rpc("set_charge_paid_state", {
+        p_charge_id: freshCharge.id,
+        p_paid_amount: Number(newPaidAmount.toFixed(2)),
+        p_status: newStatus,
+      });
 
       if (chargeErr) throw chargeErr;
 

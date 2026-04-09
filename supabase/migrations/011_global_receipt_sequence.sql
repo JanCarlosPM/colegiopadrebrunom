@@ -57,7 +57,7 @@ begin
   values (1, 0)
   on conflict (id) do nothing;
 
-  select last_number
+  perform 1
   from public.receipt_sequence_settings
   where id = 1
   for update;

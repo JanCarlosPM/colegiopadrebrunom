@@ -350,6 +350,13 @@ export default function Matriculas() {
       if (!receiptTrim) throw new Error("RECIBO_REQUERIDO");
 
       const now = new Date().toISOString();
+      let createdEnrollmentId: string | null = null;
+      let previousEnrollmentState: {
+        id: string;
+        paid_amount: number;
+        change_amount: number;
+        status: string | null;
+      } | null = null;
 
       const { data: existingRaw, error: existingError } = await supabase
         .from("enrollments")
@@ -428,7 +435,7 @@ export default function Matriculas() {
 
         statusPago = deriveEnrollmentStatus(totalOriginal, montoAplicado);
 
-        const { error: insertEnrollmentError } = await supabase
+        const { data: insertedEnrollment, error: insertEnrollmentError } = await supabase
           .from("enrollments")
           .insert({
             student_id: selectedStudent.id,
@@ -439,10 +446,12 @@ export default function Matriculas() {
             currency,
             status: statusPago,
             enrolled_at: now,
-          });
+          })
+          .select("id")
+          .single();
 
         if (insertEnrollmentError) throw insertEnrollmentError;
-        await ensureMonthlyCharges();
+        createdEnrollmentId = insertedEnrollment?.id ?? null;
       } else {
         const totalOriginal = Number(existing.total_amount);
         const alreadyPaid = Number(existing.paid_amount);
@@ -461,6 +470,12 @@ export default function Matriculas() {
 
         const newPaid = alreadyPaid + montoAplicado;
         statusPago = deriveEnrollmentStatus(totalOriginal, newPaid);
+        previousEnrollmentState = {
+          id: existing.id,
+          paid_amount: alreadyPaid,
+          change_amount: Number(existing.change_amount ?? 0),
+          status: existing.status ?? null,
+        };
 
         const { error: updateEnrollmentError } = await supabase
           .from("enrollments")
@@ -472,38 +487,55 @@ export default function Matriculas() {
           .eq("id", existing.id);
 
         if (updateEnrollmentError) throw updateEnrollmentError;
-        await ensureMonthlyCharges();
       }
 
-      const { data: payRow, error: paymentError } = await supabase
-        .from("payments")
-        .insert({
-          student_id: selectedStudent.id,
-          concept: "MATRICULA",
-          amount: montoAplicado,
-          received_amount: enrollmentFlow.paid,
-          change_amount: cambioPago,
-          currency,
-          academic_year: year,
-          paid_at: now,
-          description: statusPago,
-          method: currency === "USD" ? "DOLAR" : "EFECTIVO",
-          receipt_number: receiptTrim,
-        })
-        .select("id")
-        .single();
+      try {
+        const { data: payRow, error: paymentError } = await supabase
+          .from("payments")
+          .insert({
+            student_id: selectedStudent.id,
+            concept: "MATRICULA",
+            amount: montoAplicado,
+            received_amount: enrollmentFlow.paid,
+            change_amount: cambioPago,
+            currency,
+            academic_year: year,
+            paid_at: now,
+            description: statusPago,
+            method: currency === "USD" ? "DOLAR" : "EFECTIVO",
+            receipt_number: receiptTrim,
+          })
+          .select("id")
+          .single();
 
-      if (paymentError) throw paymentError;
-      if (!payRow?.id) throw new Error("PAYMENT_INSERT_FAILED");
+        if (paymentError) throw paymentError;
+        if (!payRow?.id) throw new Error("PAYMENT_INSERT_FAILED");
 
-      return {
-        paidAt: now,
-        paymentId: payRow.id as string,
-        receiptNumber: receiptTrim,
-        montoAplicado,
-        cambioPago,
-        statusPago,
-      };
+        await ensureMonthlyCharges();
+
+        return {
+          paidAt: now,
+          paymentId: payRow.id as string,
+          receiptNumber: receiptTrim,
+          montoAplicado,
+          cambioPago,
+          statusPago,
+        };
+      } catch (paymentInsertError) {
+        if (createdEnrollmentId) {
+          await supabase.from("enrollments").delete().eq("id", createdEnrollmentId);
+        } else if (previousEnrollmentState) {
+          await supabase
+            .from("enrollments")
+            .update({
+              paid_amount: previousEnrollmentState.paid_amount,
+              change_amount: previousEnrollmentState.change_amount,
+              status: previousEnrollmentState.status,
+            })
+            .eq("id", previousEnrollmentState.id);
+        }
+        throw paymentInsertError;
+      }
     },
 
     onSuccess: async (result) => {

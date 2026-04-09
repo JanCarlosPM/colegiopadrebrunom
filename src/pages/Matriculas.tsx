@@ -52,8 +52,14 @@ type EnrollmentRow = {
   student_id: string;
   total_amount: number;
   paid_amount: number;
+  enrolled_at?: string | null;
   currency: "NIO" | "USD";
   status: "PENDIENTE" | "PARCIAL" | "PAGADO";
+  students?: {
+    full_name?: string | null;
+    grades?: { name?: string | null } | null;
+    sections?: { name?: string | null } | null;
+  } | null;
 };
 
 type MatriculaPaymentRow = {
@@ -72,9 +78,35 @@ type MatriculaPaymentRow = {
   } | null;
 };
 
+type MatriculaSummaryRow = {
+  enrollment_id: string;
+  student_id: string;
+  student_name: string;
+  grade_name: string;
+  section_name: string;
+  total_amount: number;
+  paid_amount: number;
+  pending_amount: number;
+  currency: "NIO" | "USD";
+  status: "PENDIENTE" | "PARCIAL" | "PAGADO";
+  latest_payment_amount: number | null;
+  latest_payment_date: string | null;
+  latest_payment_receipt: string | null;
+  latest_payment_id: string | null;
+};
+
 const EMPTY_ENROLLMENTS: EnrollmentRow[] = [];
 const EMPTY_STUDENTS: StudentRow[] = [];
 const EMPTY_PAYMENTS: MatriculaPaymentRow[] = [];
+
+const deriveEnrollmentStatus = (
+  totalAmount: number,
+  paidAmount: number
+): "PENDIENTE" | "PARCIAL" | "PAGADO" => {
+  if (paidAmount <= 0.0001) return "PENDIENTE";
+  if (paidAmount + 0.0001 >= totalAmount) return "PAGADO";
+  return "PARCIAL";
+};
 
 /* ================= FETCH ================= */
 
@@ -238,35 +270,73 @@ export default function Matriculas() {
     );
   }, [students, search]);
 
-  const filteredPayments = useMemo(() => {
-    if (!tableSearch) return payments;
+  const enrollmentSummaries = useMemo<MatriculaSummaryRow[]>(() => {
+    const latestPaymentByStudent = new Map<string, MatriculaPaymentRow>();
+    payments.forEach((payment) => {
+      const prev = latestPaymentByStudent.get(payment.student_id);
+      if (!prev) {
+        latestPaymentByStudent.set(payment.student_id, payment);
+        return;
+      }
+      const prevTime = new Date(prev.paid_at).getTime();
+      const curTime = new Date(payment.paid_at).getTime();
+      if (curTime >= prevTime) latestPaymentByStudent.set(payment.student_id, payment);
+    });
 
-    return payments.filter((p) => {
-      const searchValue = tableSearch.toLowerCase();
+    return enrollments.map((enrollment) => {
+      const total = Number(enrollment.total_amount || 0);
+      const paid = Number(enrollment.paid_amount || 0);
+      const pending = Math.max(total - paid, 0);
+      const computedStatus = deriveEnrollmentStatus(total, paid);
+      const latestPayment = latestPaymentByStudent.get(enrollment.student_id);
 
-      const fecha = new Date(p.paid_at).toLocaleString("es-NI", {
-        timeZone: "America/Managua",
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }).toLowerCase();
+      return {
+        enrollment_id: enrollment.id,
+        student_id: enrollment.student_id,
+        student_name: enrollment.students?.full_name ?? "—",
+        grade_name: enrollment.students?.grades?.name ?? "—",
+        section_name: enrollment.students?.sections?.name ?? "—",
+        total_amount: total,
+        paid_amount: paid,
+        pending_amount: pending,
+        currency: normalizeCurrency(enrollment.currency),
+        status: computedStatus,
+        latest_payment_amount: latestPayment ? Number(latestPayment.amount || 0) : null,
+        latest_payment_date: latestPayment?.paid_at ?? null,
+        latest_payment_receipt: latestPayment?.receipt_number ?? null,
+        latest_payment_id: latestPayment?.id ?? null,
+      };
+    });
+  }, [enrollments, payments]);
 
+  const filteredSummaries = useMemo(() => {
+    if (!tableSearch) return enrollmentSummaries;
+    const searchValue = tableSearch.toLowerCase();
+    return enrollmentSummaries.filter((row) => {
+      const fecha = row.latest_payment_date
+        ? new Date(row.latest_payment_date).toLocaleString("es-NI", {
+            timeZone: "America/Managua",
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          }).toLowerCase()
+        : "";
       return (
-        p.students?.full_name?.toLowerCase().includes(searchValue) ||
-        p.students?.grades?.name?.toLowerCase().includes(searchValue) ||
-        p.students?.sections?.name?.toLowerCase().includes(searchValue) ||
-        String(p.amount).includes(searchValue) ||
-        String(p.received_amount).includes(searchValue) ||
-        String(p.change_amount).includes(searchValue) ||
-        String(p.currency).toLowerCase().includes(searchValue) ||
-        String(p.description ?? "").toLowerCase().includes(searchValue) ||
-        String(p.receipt_number ?? "").toLowerCase().includes(searchValue) ||
+        row.student_name.toLowerCase().includes(searchValue) ||
+        row.grade_name.toLowerCase().includes(searchValue) ||
+        row.section_name.toLowerCase().includes(searchValue) ||
+        String(row.total_amount).includes(searchValue) ||
+        String(row.paid_amount).includes(searchValue) ||
+        String(row.pending_amount).includes(searchValue) ||
+        String(row.currency).toLowerCase().includes(searchValue) ||
+        String(row.status).toLowerCase().includes(searchValue) ||
+        String(row.latest_payment_receipt ?? "").toLowerCase().includes(searchValue) ||
         fecha.includes(searchValue)
       );
     });
-  }, [payments, tableSearch]);
+  }, [enrollmentSummaries, tableSearch]);
 
   const isPaidValid = enrollmentFlow.validation.isValid;
 
@@ -291,7 +361,7 @@ export default function Matriculas() {
 
       let montoAplicado = 0;
       let cambioPago = 0;
-      let statusPago = "PENDIENTE";
+      let statusPago: "PENDIENTE" | "PARCIAL" | "PAGADO" = "PENDIENTE";
 
       const ensureMonthlyCharges = async () => {
         const gradeId = selectedStudent?.grade_id;
@@ -354,7 +424,7 @@ export default function Matriculas() {
         montoAplicado = Math.min(enrollmentFlow.paid, totalOriginal);
         cambioPago = Math.max(enrollmentFlow.paid - montoAplicado, 0);
 
-        statusPago = montoAplicado < totalOriginal ? "PARCIAL" : "PAGADO";
+        statusPago = deriveEnrollmentStatus(totalOriginal, montoAplicado);
 
         const { error: insertEnrollmentError } = await supabase
           .from("enrollments")
@@ -388,7 +458,7 @@ export default function Matriculas() {
         }
 
         const newPaid = alreadyPaid + montoAplicado;
-        statusPago = newPaid < totalOriginal ? "PARCIAL" : "PAGADO";
+        statusPago = deriveEnrollmentStatus(totalOriginal, newPaid);
 
         const { error: updateEnrollmentError } = await supabase
           .from("enrollments")
@@ -809,103 +879,118 @@ export default function Matriculas() {
         <div className="flex-1">
           <label className="text-sm font-medium block mb-1">Buscar</label>
           <Input
-            placeholder="Estudiante, grado, sección, recibido, cambio, estado o fecha..."
+            placeholder="Estudiante, grado, sección, total, pagado, saldo, estado o recibo..."
             value={tableSearch}
             onChange={(e) => setTableSearch(e.target.value)}
           />
         </div>
       </div>
 
-      {/* TABLA DE PAGOS DE MATRÍCULA */}
+      {/* TABLA RESUMEN DE MATRÍCULAS */}
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Estudiante</TableHead>
             <TableHead>Grado</TableHead>
             <TableHead>Sección</TableHead>
-            <TableHead>Monto Aplicado</TableHead>
-            <TableHead>Recibido</TableHead>
-            <TableHead>Cambio</TableHead>
+            <TableHead>Total matrícula</TableHead>
+            <TableHead>Pagado</TableHead>
+            <TableHead>Saldo pendiente</TableHead>
             <TableHead>Moneda</TableHead>
             <TableHead>Estado</TableHead>
-            <TableHead>Fecha y Hora</TableHead>
+            <TableHead>Último abono</TableHead>
+            <TableHead>Fecha último pago</TableHead>
             <TableHead>N° recibo</TableHead>
             <TableHead className="text-center">Acción</TableHead>
           </TableRow>
         </TableHeader>
 
         <TableBody>
-          {filteredPayments.length === 0 && (
+          {filteredSummaries.length === 0 && (
             <TableRow>
-              <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
-                No hay pagos de matrícula para este filtro.
+              <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
+                No hay matrículas para este filtro.
               </TableCell>
             </TableRow>
           )}
-                  {filteredPayments.map((p) => (
-            <TableRow key={p.id}>
-              <TableCell>{p.students?.full_name}</TableCell>
+          {filteredSummaries.map((row) => (
+            <TableRow key={row.enrollment_id}>
+              <TableCell>{row.student_name}</TableCell>
 
-              <TableCell>{p.students?.grades?.name ?? "-"}</TableCell>
+              <TableCell>{row.grade_name}</TableCell>
 
-              <TableCell>{p.students?.sections?.name ?? "-"}</TableCell>
+              <TableCell>{row.section_name}</TableCell>
 
               <TableCell>
-                {formatMoney(Number(p.amount || 0), p.currency)}
+                {formatMoney(row.total_amount, row.currency)}
               </TableCell>
 
               <TableCell>
-                {formatMoney(Number(p.received_amount || 0), p.currency)}
+                {formatMoney(row.paid_amount, row.currency)}
               </TableCell>
 
               <TableCell>
-                {formatMoney(Number(p.change_amount || 0), p.currency)}
+                {formatMoney(row.pending_amount, row.currency)}
               </TableCell>
 
-              <TableCell>{p.currency === "USD" ? "Dólares" : "Córdobas"}</TableCell>
+              <TableCell>{row.currency === "USD" ? "Dólares" : "Córdobas"}</TableCell>
 
               <TableCell>
-                <StatusBadge status={p.description ?? "—"} />
+                <StatusBadge status={row.status} />
               </TableCell>
 
               <TableCell>
-                {new Date(p.paid_at).toLocaleString("es-NI", {
-                  timeZone: "America/Managua",
-                  day: "2-digit",
-                  month: "2-digit",
-                  year: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                {row.latest_payment_amount != null
+                  ? formatMoney(row.latest_payment_amount, row.currency)
+                  : "—"}
               </TableCell>
 
               <TableCell className="text-muted-foreground text-sm">
-                {receiptNumberForPrint(p.receipt_number, p.id)}
+                {row.latest_payment_date
+                  ? new Date(row.latest_payment_date).toLocaleString("es-NI", {
+                      timeZone: "America/Managua",
+                      day: "2-digit",
+                      month: "2-digit",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : "—"}
+              </TableCell>
+
+              <TableCell className="text-muted-foreground text-sm">
+                {row.latest_payment_id
+                  ? receiptNumberForPrint(row.latest_payment_receipt, row.latest_payment_id)
+                  : "—"}
               </TableCell>
 
               <TableCell className="text-center">
                 <Button
                   variant="outline"
                   size="icon"
+                  disabled={!row.latest_payment_id || !row.latest_payment_date}
                   onClick={() =>
                     imprimirReciboMatricula({
-                      numero: receiptNumberForPrint(p.receipt_number, p.id),
-                      fecha: new Date(p.paid_at).toLocaleDateString("es-NI", {
+                      numero: receiptNumberForPrint(
+                        row.latest_payment_receipt,
+                        row.latest_payment_id ?? row.enrollment_id
+                      ),
+                      fecha: new Date(row.latest_payment_date ?? new Date().toISOString()).toLocaleDateString("es-NI", {
                         timeZone: "America/Managua",
                       }),
-                      estudiante: p.students?.full_name ?? "",
-                      grado: p.students?.grades?.name ?? "",
+                      estudiante: row.student_name ?? "",
+                      grado: row.grade_name ?? "",
                       anio: String(year),
-                      nivel: p.students?.sections?.name ?? "",
+                      nivel: row.section_name ?? "",
                       montoCordobas:
-                        p.currency === "NIO"
-                          ? Number(p.received_amount || 0).toFixed(2)
+                        row.currency === "NIO"
+                          ? Number(row.latest_payment_amount || 0).toFixed(2)
                           : "",
                       montoDolares:
-                        p.currency === "USD"
-                          ? Number(p.received_amount || 0).toFixed(2)
+                        row.currency === "USD"
+                          ? Number(row.latest_payment_amount || 0).toFixed(2)
                           : "",
-                      sumaDe: `${p.currency === "USD" ? "$" : "C$"} ${Number(p.amount || 0).toFixed(2)}`,
+                      sumaDe: `${row.currency === "USD" ? "$" : "C$"} ${Number(row.latest_payment_amount || 0).toFixed(2)}`,
                       concepto: "Pago de matrícula",
                     })
                   }

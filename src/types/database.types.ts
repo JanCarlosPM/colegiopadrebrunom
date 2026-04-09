@@ -373,6 +373,24 @@ export type Database = {
         };
         Relationships: [];
       };
+      receipt_sequence_settings: {
+        Row: {
+          id: number;
+          last_number: number;
+          updated_at: string;
+        };
+        Insert: {
+          id?: number;
+          last_number?: number;
+          updated_at?: string;
+        };
+        Update: {
+          id?: number;
+          last_number?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       school_settings: {
         Row: {
           id: string;

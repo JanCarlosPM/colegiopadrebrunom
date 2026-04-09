@@ -218,6 +218,7 @@ export default function Pagos() {
     charge_id: "",
     recibido: "",
     pay_currency: "USD",
+    receipt_number: "",
   });
 
   const selectedStudent = useMemo(
@@ -352,6 +353,8 @@ export default function Pagos() {
       if (!isRecibidoFormatValid || !isRecibidoDigitsValid || !isRecibidoPositive) {
         throw new Error("LIMITE_RECIBIDO");
       }
+      const receiptTrim = form.receipt_number.trim();
+      if (!receiptTrim) throw new Error("RECIBO_REQUERIDO");
 
       const paidAt = new Date().toISOString();
       const safeRate = dynamicRate > 0 ? dynamicRate : DEFAULT_EXCHANGE_RATE;
@@ -417,7 +420,6 @@ export default function Pagos() {
           ? recibidoNum - freshAmountAppliedInPayCurrency
           : 0;
 
-      const receiptTrim = form.receipt_number.trim();
       const { data: insertedPay, error: payErr } = await supabase
         .from("payments")
         .insert({
@@ -434,7 +436,7 @@ export default function Pagos() {
           paid_at: paidAt,
           status: "COMPLETADO",
           description: newStatus,
-          receipt_number: receiptTrim || null,
+          receipt_number: receiptTrim,
         })
         .select("id")
         .single();
@@ -447,7 +449,7 @@ export default function Pagos() {
       return {
         paidAt,
         paymentId: insertedPay.id as string,
-        receiptNumber: receiptTrim || null,
+        receiptNumber: receiptTrim,
         chargeMonth: freshCharge.month,
         totalInPayCurrency: Number(freshRemainingInPayCurrency.toFixed(2)),
         appliedInPayCurrency: Number(freshAmountAppliedInPayCurrency.toFixed(2)),
@@ -499,9 +501,17 @@ export default function Pagos() {
           YA_PAGADO: "Esta mensualidad ya está pagada y no se puede cobrar de nuevo.",
           NO_STUDENT: "Debes seleccionar un estudiante.",
           MONEDA_INVALIDA: "Moneda de pago inválida.",
+          RECIBO_REQUERIDO: "El número de recibo es obligatorio.",
+          RECEIPT_REQUIRED: "El número de recibo es obligatorio.",
+          RECEIPT_NOT_NUMERIC: "El número de recibo debe contener solo dígitos.",
         },
       });
 
+      if (message.includes("RECEIPT_DUPLICATE:")) {
+        const duplicated = message.split("RECEIPT_DUPLICATE:")[1]?.trim();
+        toast.error(`El número de recibo ${duplicated || ""} ya fue utilizado`.trim());
+        return;
+      }
       if (message.includes("monto recibido")) {
         toast.error("El monto recibido no es válido.");
         return;
@@ -736,16 +746,29 @@ export default function Pagos() {
 
                         <div>
                           <label className="text-sm font-medium block mb-2">
-                            N° recibo (opcional)
+                            N° recibo
                           </label>
-                          <Input
-                            className="h-10 text-sm"
-                            placeholder="Correlativo sugerido; puedes editarlo"
-                            value={form.receipt_number}
-                            onChange={(e) =>
-                              setForm({ ...form, receipt_number: e.target.value })
-                            }
-                          />
+                          <div className="flex gap-2">
+                            <Input
+                              className="h-10 text-sm"
+                              placeholder="Correlativo sugerido; puedes editarlo"
+                              value={form.receipt_number}
+                              onChange={(e) =>
+                                setForm({ ...form, receipt_number: e.target.value })
+                              }
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-10 text-xs"
+                              onClick={async () => {
+                                const next = await suggestNextReceiptNumber(year);
+                                setForm((prev) => ({ ...prev, receipt_number: next }));
+                              }}
+                            >
+                              Usar siguiente
+                            </Button>
+                          </div>
                         </div>
 
                         <div className="md:col-span-2">
@@ -837,6 +860,7 @@ export default function Pagos() {
                         className="w-full h-10 text-sm font-semibold"
                         disabled={
                           !form.charge_id ||
+                          !form.receipt_number.trim() ||
                           !isRecibidoValid ||
                           createPayment.isPending
                         }

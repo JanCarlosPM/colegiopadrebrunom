@@ -325,9 +325,10 @@ export default function OtrosCobros() {
       if (amountToCharge <= 0) throw new Error("Monto inválido");
       if (!isReceivedValid) throw new Error("Recibido inválido");
       if (!selectedStudent || !selectedItem) throw new Error("Datos incompletos");
+      const receiptTrim = paymentForm.receipt_number.trim();
+      if (!receiptTrim) throw new Error("RECIBO_REQUERIDO");
 
       const paymentDate = new Date().toISOString();
-      const receiptTrim = paymentForm.receipt_number.trim();
       const { data: inserted, error } = await supabase
         .from("other_payments")
         .insert({
@@ -342,7 +343,7 @@ export default function OtrosCobros() {
           payment_date: paymentDate,
           academic_year: year,
           notes: paymentForm.notes.trim() || null,
-          receipt_number: receiptTrim || null,
+          receipt_number: receiptTrim,
         })
         .select("id")
         .single();
@@ -357,7 +358,7 @@ export default function OtrosCobros() {
         receivedAmount: Number(receivedNum.toFixed(2)),
         currency,
         notes: paymentForm.notes.trim(),
-        receipt_number: receiptTrim || null,
+        receipt_number: receiptTrim,
       };
     },
     onSuccess: async (ctx) => {
@@ -372,6 +373,7 @@ export default function OtrosCobros() {
         received: "",
         currency: "NIO",
         notes: "",
+        receipt_number: "",
       });
       setStudentSearch("");
 
@@ -402,12 +404,23 @@ export default function OtrosCobros() {
     onError: (e: unknown) =>
       isMissingTableError(e)
         ? toast.error("Falta aplicar la migración del módulo. Ejecuta 002_other_payments_module.sql en Supabase.")
-        : toast.error(
-            mapSupabaseErrorToToast(e, {
+        : (() => {
+            const msg = mapSupabaseErrorToToast(e, {
               currency,
               fallback: "No se pudo registrar el pago",
-            })
-          ),
+              customMap: {
+                RECIBO_REQUERIDO: "El número de recibo es obligatorio.",
+                RECEIPT_REQUIRED: "El número de recibo es obligatorio.",
+                RECEIPT_NOT_NUMERIC: "El número de recibo debe contener solo dígitos.",
+              },
+            });
+            if (msg.includes("RECEIPT_DUPLICATE:")) {
+              const duplicated = msg.split("RECEIPT_DUPLICATE:")[1]?.trim();
+              toast.error(`El número de recibo ${duplicated || ""} ya fue utilizado`.trim());
+              return;
+            }
+            toast.error(msg);
+          })(),
   });
 
   return (
@@ -710,6 +723,28 @@ export default function OtrosCobros() {
                   }
                 />
               </FormField>
+
+              <FormField label="N° recibo">
+                <div className="flex gap-2">
+                  <Input
+                    value={paymentForm.receipt_number}
+                    placeholder="Correlativo sugerido; puedes editarlo"
+                    onChange={(e) =>
+                      setPaymentForm((f) => ({ ...f, receipt_number: e.target.value }))
+                    }
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={async () => {
+                      const next = await suggestNextReceiptNumber(year);
+                      setPaymentForm((f) => ({ ...f, receipt_number: next }));
+                    }}
+                  >
+                    Usar siguiente
+                  </Button>
+                </div>
+              </FormField>
             </div>
 
             <DialogFooter>
@@ -722,6 +757,7 @@ export default function OtrosCobros() {
                   createOtherPayment.isPending ||
                   !selectedStudent ||
                   !selectedItem ||
+                  !paymentForm.receipt_number.trim() ||
                   !isReceivedValid ||
                   amountToCharge <= 0
                 }

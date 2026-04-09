@@ -66,6 +66,11 @@ type SettingsRow = {
   discount_early_enabled?: boolean | null;
   logo_url?: string | null;
 };
+type ReceiptSequenceRow = {
+  id: number;
+  last_number: number;
+  updated_at?: string | null;
+};
 
 type GradeRow = { id: string; name: string; sort_order?: number | null };
 type GradePriceRow = {
@@ -160,6 +165,16 @@ const fetchEnrollmentPricing = async (): Promise<Tables<"enrollment_pricing"> | 
   return data as Tables<"enrollment_pricing"> | null;
 };
 
+const fetchReceiptSequence = async (): Promise<ReceiptSequenceRow | null> => {
+  const { data, error } = await supabase
+    .from("receipt_sequence_settings")
+    .select("id, last_number, updated_at")
+    .eq("id", 1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as ReceiptSequenceRow | null) ?? null;
+};
+
 /* ================= COMPONENT ================= */
 
 const Configuracion = () => {
@@ -189,12 +204,17 @@ const Configuracion = () => {
     queryKey: ["enrollment-pricing"],
     queryFn: fetchEnrollmentPricing,
   });
+  const { data: receiptSequence, isLoading: loadingReceiptSequence } = useQuery({
+    queryKey: ["receipt-sequence"],
+    queryFn: fetchReceiptSequence,
+  });
 
   const [generalForm, setGeneralForm] = useState<SettingsRow>({});
   const [preciosByGrade, setPreciosByGrade] = useState<Record<string, { nio: string; usd: string }>>({});
   const [matriculaNio, setMatriculaNio] = useState("");
   const [matriculaUsd, setMatriculaUsd] = useState("");
   const [exchangeRate, setExchangeRate] = useState(String(DEFAULT_EXCHANGE_RATE));
+  const [receiptBaseInput, setReceiptBaseInput] = useState("");
 
   const [userDialogOpen, setUserDialogOpen] = useState(false);
   const [userEditId, setUserEditId] = useState<string | null>(null);
@@ -237,6 +257,14 @@ const Configuracion = () => {
       });
     }
   }, [settings]);
+
+  useEffect(() => {
+    if (receiptSequence) {
+      setReceiptBaseInput(String(receiptSequence.last_number ?? 0));
+    } else {
+      setReceiptBaseInput("0");
+    }
+  }, [receiptSequence]);
 
   /**
    * Matrícula: fuente `enrollment_pricing`. Solo rellenar desde el servidor cuando cambian
@@ -523,6 +551,29 @@ const Configuracion = () => {
     onError: (e: Error) => toast.error(e.message || "Error al guardar matrícula"),
   });
 
+  const saveReceiptBase = useMutation({
+    mutationFn: async () => {
+      const parsed = Number(String(receiptBaseInput).trim());
+      if (!Number.isInteger(parsed) || parsed < 0) {
+        throw new Error("El último número base debe ser un entero mayor o igual a 0.");
+      }
+      const { error } = await supabase.from("receipt_sequence_settings").upsert(
+        {
+          id: 1,
+          last_number: parsed,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" },
+      );
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["receipt-sequence"] });
+      toast.success("Numeración de recibos actualizada.");
+    },
+    onError: (e: Error) => toast.error(e.message || "Error al guardar la numeración de recibos."),
+  });
+
   const preciosByGradeRef = useRef(preciosByGrade);
   preciosByGradeRef.current = preciosByGrade;
   const matriculaFieldsRef = useRef({ nio: matriculaNio, usd: matriculaUsd });
@@ -756,6 +807,33 @@ const Configuracion = () => {
                 <Button onClick={() => saveGeneral.mutate()} disabled={saveGeneral.isPending || loadingSettings}>
                   {saveGeneral.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
                   Guardar
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Numeración global de recibos</CardTitle>
+                <CardDescription>
+                  Define el último número base utilizado. El siguiente recibo sugerido será este valor + 1.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label className="input-label">Último número base de recibo</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={receiptBaseInput}
+                    onChange={(e) => setReceiptBaseInput(e.target.value.replace(/[^\d]/g, ""))}
+                    placeholder="Ejemplo: 80951"
+                  />
+                </div>
+                <Button
+                  onClick={() => saveReceiptBase.mutate()}
+                  disabled={saveReceiptBase.isPending || loadingReceiptSequence}
+                >
+                  {saveReceiptBase.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                  Guardar numeración
                 </Button>
               </CardContent>
             </Card>

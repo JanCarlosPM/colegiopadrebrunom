@@ -346,6 +346,8 @@ export default function Matriculas() {
     mutationFn: async () => {
       if (!selectedStudent) throw new Error("NO_STUDENT");
       if (!isPaidValid) throw new Error("MONTO_INVALIDO");
+      const receiptTrim = matriculaReceiptNumber.trim();
+      if (!receiptTrim) throw new Error("RECIBO_REQUERIDO");
 
       const now = new Date().toISOString();
 
@@ -473,7 +475,6 @@ export default function Matriculas() {
         await ensureMonthlyCharges();
       }
 
-      const receiptTrim = matriculaReceiptNumber.trim();
       const { data: payRow, error: paymentError } = await supabase
         .from("payments")
         .insert({
@@ -487,7 +488,7 @@ export default function Matriculas() {
           paid_at: now,
           description: statusPago,
           method: currency === "USD" ? "DOLAR" : "EFECTIVO",
-          receipt_number: receiptTrim || null,
+          receipt_number: receiptTrim,
         })
         .select("id")
         .single();
@@ -498,7 +499,7 @@ export default function Matriculas() {
       return {
         paidAt: now,
         paymentId: payRow.id as string,
-        receiptNumber: receiptTrim || null,
+        receiptNumber: receiptTrim,
         montoAplicado,
         cambioPago,
         statusPago,
@@ -512,7 +513,7 @@ export default function Matriculas() {
 
       setTimeout(() => {
         imprimirReciboMatricula({
-          numero: String(Date.now()).slice(-5),
+          numero: receiptNumberForPrint(result.receiptNumber, result.paymentId),
           fecha: new Date(result.paidAt).toLocaleDateString("es-NI", {
             timeZone: "America/Managua",
           }),
@@ -544,12 +545,21 @@ export default function Matriculas() {
         fallback: "Error al registrar matrícula.",
         customMap: {
           YA_PAGADO: "Esta matrícula ya está completamente pagada.",
+          RECIBO_REQUERIDO: "El número de recibo es obligatorio.",
+          RECEIPT_REQUIRED: "El número de recibo es obligatorio.",
+          RECEIPT_NOT_NUMERIC: "El número de recibo debe contener solo dígitos.",
           MONTO_INVALIDO:
             currency === "USD"
               ? "Recibido inválido. En USD se permiten hasta 3 cifras (999.99)."
               : "Recibido inválido. En C$ se permiten hasta 4 cifras (9999.99).",
         },
       });
+      if (message.includes("RECEIPT_DUPLICATE:")) {
+        const duplicated = message.split("RECEIPT_DUPLICATE:")[1]?.trim();
+        setInfoMsg(`El número de recibo ${duplicated || ""} ya fue utilizado`.trim());
+        setOpenInfo(true);
+        return;
+      }
       if (message.includes("ya está completamente pagada")) {
         setInfoMsg("Esta matrícula ya está completamente pagada.");
       } else {
@@ -754,14 +764,27 @@ export default function Matriculas() {
 
             <div className="mt-4">
               <label className="text-sm font-medium block mb-2">
-                N° recibo (opcional)
+                N° recibo
               </label>
-              <Input
-                className="h-10 text-sm"
-                placeholder="Correlativo sugerido al abrir; puedes editarlo"
-                value={matriculaReceiptNumber}
-                onChange={(e) => setMatriculaReceiptNumber(e.target.value)}
-              />
+              <div className="flex gap-2">
+                <Input
+                  className="h-10 text-sm"
+                  placeholder="Correlativo sugerido al abrir; puedes editarlo"
+                  value={matriculaReceiptNumber}
+                  onChange={(e) => setMatriculaReceiptNumber(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 text-xs"
+                  onClick={async () => {
+                    const next = await suggestNextReceiptNumber(year);
+                    setMatriculaReceiptNumber(next);
+                  }}
+                >
+                  Usar siguiente
+                </Button>
+              </div>
             </div>
 
             {/* RECIBIDO + CAMBIO */}
@@ -832,7 +855,7 @@ export default function Matriculas() {
             {/* BOTÓN */}
             <Button
               className="w-full mt-4 h-10 text-sm font-semibold"
-              disabled={!selectedStudent || !isPaidValid || saldoPendiente === 0}
+              disabled={!selectedStudent || !matriculaReceiptNumber.trim() || !isPaidValid || saldoPendiente === 0}
               onClick={() => createEnrollment.mutate()}
             >
               {createEnrollment.isPending ? "Registrando..." : "Registrar Pago"}

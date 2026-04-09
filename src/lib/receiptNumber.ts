@@ -26,19 +26,22 @@ export function receiptNumberForPrint(
   return String(paymentId).slice(-5);
 }
 
-/** Siguiente correlativo sugerido (max numérico hallado en recibos del año + 1). */
-export async function suggestNextReceiptNumber(academicYear: number): Promise<string> {
+/** Siguiente correlativo sugerido usando consecutivo global. */
+export async function suggestNextReceiptNumber(_academicYear?: number): Promise<string> {
+  const sequence = await supabase
+    .from("receipt_sequence_settings")
+    .select("last_number")
+    .eq("id", 1)
+    .maybeSingle();
+
+  if (!sequence.error && sequence.data?.last_number != null) {
+    const next = Number(sequence.data.last_number) + 1;
+    return String(next > 0 ? next : 1);
+  }
+
   const [payRes, otherRes] = await Promise.all([
-    supabase
-      .from("payments")
-      .select("receipt_number")
-      .eq("academic_year", academicYear)
-      .not("receipt_number", "is", null),
-    supabase
-      .from("other_payments")
-      .select("receipt_number")
-      .eq("academic_year", academicYear)
-      .not("receipt_number", "is", null),
+    supabase.from("payments").select("receipt_number").not("receipt_number", "is", null),
+    supabase.from("other_payments").select("receipt_number").not("receipt_number", "is", null),
   ]);
 
   const combined: string[] = [];
@@ -53,5 +56,5 @@ export async function suggestNextReceiptNumber(academicYear: number): Promise<st
     }
   }
 
-  return String(maxNumericFromReceiptValues(combined) + 1);
+  return String(Math.max(maxNumericFromReceiptValues(combined) + 1, 1));
 }

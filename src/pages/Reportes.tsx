@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Download, Users, DollarSign, AlertTriangle, Filter } from "lucide-react";
+import { FileText, Download, Users, DollarSign, AlertTriangle } from "lucide-react";
 import {
   MONTHS_ES,
   convertCurrency,
@@ -21,7 +21,6 @@ import {
   normalizeCurrency,
 } from "@/lib/billing";
 import { toast } from "sonner";
-import { receiptNumberForPrint } from "@/lib/receiptNumber";
 
 const REPORT_CATEGORIES = {
   resumen: "Resumen",
@@ -257,15 +256,9 @@ export default function Reportes() {
   const [filterApplied, setFilterApplied] = useState<ReportFiltersState>(() => defaultReportFilters());
   const [exporting, setExporting] = useState<"pdf" | "excel" | null>(null);
 
-  const filtersDirty = useMemo(
-    () =>
-      filterDraft.anio !== filterApplied.anio ||
-      filterDraft.grado !== filterApplied.grado ||
-      filterDraft.mes !== filterApplied.mes ||
-      filterDraft.fechaDesde !== filterApplied.fechaDesde ||
-      filterDraft.fechaHasta !== filterApplied.fechaHasta,
-    [filterDraft, filterApplied]
-  );
+  useEffect(() => {
+    setFilterApplied(filterDraft);
+  }, [filterDraft]);
 
   const year = Number(filterApplied.anio);
 
@@ -902,9 +895,7 @@ export default function Reportes() {
         <CardHeader className="p-0 mb-4">
           <CardTitle className="text-base">Filtros</CardTitle>
           <CardDescription>
-            Elegí el tipo de reporte. Ajustá año, grado, mes o fechas y pulsá{" "}
-            <span className="font-medium text-foreground">Aplicar filtros</span> para actualizar la tabla y las
-            exportaciones.
+            Elegí el tipo de reporte. Ajustá año, grado, mes o fechas y la tabla se actualiza automáticamente.
           </CardDescription>
         </CardHeader>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -1006,23 +997,10 @@ export default function Reportes() {
           )}
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Button
-            type="button"
-            onClick={() => setFilterApplied({ ...filterDraft })}
-            disabled={!filtersDirty}
-            className="gap-2"
-          >
-            <Filter className="h-4 w-4" />
-            Aplicar filtros
-          </Button>
-          {filtersDirty ? (
-            <span className="text-sm text-amber-600 dark:text-amber-500">
-              Tenés cambios sin aplicar: la tabla sigue usando los filtros anteriores.
-            </span>
-          ) : (
-            <span className="text-sm text-muted-foreground">Filtros aplicados al reporte y a PDF/Excel.</span>
-          )}
+        <div className="mt-4">
+          <span className="text-sm text-muted-foreground">
+            Filtros sincronizados en tiempo real para tabla y exportaciones.
+          </span>
         </div>
       </Card>
 
